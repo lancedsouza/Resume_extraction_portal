@@ -8,11 +8,24 @@ from langchain_groq import ChatGroq
 from langgraph.graph import StateGraph, END
 from typing import TypedDict
 from dotenv import load_dotenv
+import streamlit as st
 
+# Load .env for local development
 load_dotenv()
 
+# Get API key
+api_key = os.getenv("GROQ_API_KEY")
+
+# If running on Streamlit Cloud, use Secrets
+if not api_key:
+    api_key = st.secrets["GROQ_API_KEY"]
+
 # --- LLM ---
-llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
+llm = ChatGroq(
+    model="llama-3.3-70b-versatile",
+    api_key=api_key,
+    temperature=0
+)
 
 # --- CONFIG ---
 EXCEL_FILE = "sample_data.xlsx"
