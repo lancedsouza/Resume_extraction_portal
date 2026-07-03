@@ -81,6 +81,7 @@ import pandas as pd
 from pathlib import Path
 from io import BytesIO
 from processing import pipeline
+import time
 
 # API key check for Streamlit Cloud
 if not os.getenv("GROQ_API_KEY"):
@@ -104,6 +105,7 @@ if st.button("Process Resumes"):
 
         with st.spinner("Processing..."):
             for uploaded_file in uploaded_files:
+                time.sleep(1.0)  # slight delay to avoid overwhelming the system
                 temp_path = Path(f"temp_{uploaded_file.name}")
                 final_path = temp_path
                 try:

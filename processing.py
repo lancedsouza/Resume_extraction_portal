@@ -147,8 +147,9 @@ from langchain_groq import ChatGroq
 from langgraph.graph import StateGraph, END
 from typing import TypedDict
 from dotenv import load_dotenv
-
+from tenacity import retry, wait_random_exponential, stop_after_attempt
 load_dotenv()
+
 
 # --- API KEY ---
 api_key = os.getenv("GROQ_API_KEY")
@@ -156,11 +157,12 @@ if not api_key:
     raise ValueError("GROQ_API_KEY not found in environment or .env file")
 
 # --- LLM ---
-llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
-    api_key=api_key,
-    temperature=0
-)
+# llm = ChatGroq(
+#     model="llama-3.3-70b-versatile",
+#     api_key=api_key,
+#     temperature=0
+# )
+llm = ChatGroq(model="llama-3.1-8b-instant", api_key=api_key,temperature=0)
 
 # --- STATE ---
 class ResumePathState(TypedDict):
@@ -175,6 +177,7 @@ def load_pdf(state: ResumePathState) -> dict:
     text = "\n".join([page.page_content for page in pages])
     return {"resume_text": text}
 
+@retry(wait=wait_random_exponential(multiplier=1, max=60), stop=stop_after_attempt(5))
 def extract_data(state: ResumePathState) -> dict:
     prompt = f"""
 You are a resume parser. Extract information and return ONLY a valid JSON object.
