@@ -1,0 +1,10 @@
+services:
+  resume-portal:
+    build: .
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./data:/app/data  # Persists your Excel file to your host machine
+    env_file:
+      - .env
+    restart: always

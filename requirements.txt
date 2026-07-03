@@ -1,0 +1,9 @@
+streamlit
+langgraph
+langchain-groq
+langchain-community
+pandas
+openpyxl
+pypdf
+python-dotenv
+docx2pdf
