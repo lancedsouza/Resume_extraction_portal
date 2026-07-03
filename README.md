@@ -163,7 +163,7 @@ Word → PDF conversion requires LibreOffice, which is installed in the Docker i
 
 ---
 
-## Built By
+## Built By Lancelot Dsouza
 
 **Manalot** — Executive Search, Mumbai  
 Specialising in senior finance placements across GCCs
