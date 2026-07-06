@@ -1,9 +1,10 @@
 streamlit
-langchain-google-genai
+redis
+rq
+langchain-groq
 langgraph
-pdfplumber
 pandas
 openpyxl
-python-dotenv
 mammoth
-filelock
+pdfplumber
+python-dotenv
