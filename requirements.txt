@@ -7,4 +7,4 @@ pandas
 openpyxl
 python-dotenv
 tenacity
-python-docx
+mammoth

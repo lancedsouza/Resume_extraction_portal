@@ -1,13 +1,13 @@
 import json
 import re
 import os
+import mammoth
 from pathlib import Path
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_groq import ChatGroq
 from langgraph.graph import StateGraph, END
 from typing import TypedDict
 from dotenv import load_dotenv
-from docx import Document as DocxDocument
 
 load_dotenv()
 
@@ -31,14 +31,15 @@ def load_file(state: ResumePathState) -> dict:
         text = "\n".join([page.page_content for page in pages])
 
     elif path.suffix.lower() in [".docx", ".doc"]:
-        doc = DocxDocument(str(path))
-        text = "\n".join([
-            para.text for para in doc.paragraphs
-            if para.text.strip()
-        ])
+        with open(str(path), "rb") as f:
+            result = mammoth.extract_raw_text(f)
+            text = result.value
 
     else:
         raise ValueError(f"Unsupported file type: {path.suffix}")
+
+    if not text.strip():
+        raise ValueError(f"No text extracted from {path.name} — may be scanned or image-based")
 
     return {"resume_text": text}
 
