@@ -5,6 +5,8 @@ from pathlib import Path
 from io import BytesIO
 import tempfile
 import time
+import traceback
+
 
 if not os.getenv("GROQ_API_KEY"):
     os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
@@ -45,7 +47,7 @@ if st.button("🚀 Process Resumes"):
             except Exception as e:
                 errors.append(f.name)
                 st.error(f"✗ {f.name}: {str(e)}")
-
+                st.code(traceback.format_exc())  # ← shows full traceback in the UIThat way you don't need to dig through logs — the full error prints right on screen when a file fails.
             finally:
                 if tmp_path.exists():
                     tmp_path.unlink()
@@ -80,8 +82,7 @@ if st.button("🚀 Process Resumes"):
                 })
 
             df = pd.DataFrame(rows)
-            st.dataframe(df, use_container_width=True)
-
+            st.dataframe(df, width='stretch')
             buffer = BytesIO()
             df.to_excel(buffer, index=False)
             buffer.seek(0)
