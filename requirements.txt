@@ -7,3 +7,6 @@ openpyxl
 pypdf
 python-dotenv
 docx2pdf
+unstructured
+python-magic  # Required for detecting file types
+docx2txt

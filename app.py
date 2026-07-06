@@ -119,7 +119,7 @@ if st.button("Process Resumes"):
                         )
                         final_path = Path(str(temp_path).rsplit('.', 1)[0] + ".pdf")
 
-                    res = pipeline.invoke({"file_path": str(final_path)})
+                    res = pipeline.invoke({"file_path": str(temp_path)})
                     results.append(res["extracted_data"])
                     st.success(f"✓ {uploaded_file.name}")
 
