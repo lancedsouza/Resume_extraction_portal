@@ -148,6 +148,7 @@ from langgraph.graph import StateGraph, END
 from typing import TypedDict
 from dotenv import load_dotenv
 from tenacity import retry, wait_random_exponential, stop_after_attempt
+from langchain_community.document_loaders import UnstructuredFileLoader
 load_dotenv()
 
 
@@ -172,7 +173,8 @@ class ResumePathState(TypedDict):
 
 # --- NODES ---
 def load_pdf(state: ResumePathState) -> dict:
-    loader = PyPDFLoader(state["file_path"])
+    # loader = PyPDFLoader(state["file_path"])
+    loader = UnstructuredFileLoader(state["file_path"])
     pages = loader.load()
     text = "\n".join([page.page_content for page in pages])
     return {"resume_text": text}
