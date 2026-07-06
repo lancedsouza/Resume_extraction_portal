@@ -10,9 +10,9 @@ st.set_page_config(page_title="Manalot | AI Resume Scout", layout="wide")
 st.title("📄 Manalot AI Resume Scout")
 
 # 1. FIX: Use a local folder instead of /app/data
-DATA_DIR = Path("data")
+# Use a relative path! This creates a folder inside your app's directory.
+DATA_DIR = Path("data") 
 DATA_DIR.mkdir(exist_ok=True)
-EXCEL_PATH = DATA_DIR / "master_resume_data.xlsx"
 
 # Initialize Session State
 if 'results' not in st.session_state:

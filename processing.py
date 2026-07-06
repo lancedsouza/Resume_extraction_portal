@@ -125,6 +125,7 @@ class ResumePathState(TypedDict):
 
 def load_and_extract(state: ResumePathState) -> dict:
     path = Path(state["file_path"])
+    
     # Extraction logic
     if path.suffix.lower() == ".pdf":
         with pdfplumber.open(str(path)) as pdf:
@@ -139,22 +140,26 @@ def load_and_extract(state: ResumePathState) -> dict:
     match = re.search(r'\{.*\}', response, re.DOTALL)
     data = json.loads(match.group()) if match else {}
     
-    # --- FIXED PATHING ---
-    # Create the 'data' directory if it doesn't exist
+    # --- FIXED PATHING FOR STREAMLIT CLOUD ---
+    # We use a relative 'data/' directory inside the project root
     data_dir = Path("data")
     data_dir.mkdir(exist_ok=True)
     excel_path = data_dir / "master_resume_data.xlsx"
-    # ---------------------
+    # ----------------------------------------
     
     new_data = pd.DataFrame([data])
+    
     if excel_path.exists():
-        df = pd.concat([pd.read_excel(excel_path), new_data], ignore_index=True)
+        df = pd.read_excel(excel_path)
+        df = pd.concat([df, new_data], ignore_index=True)
     else:
         df = new_data
+        
     df.to_excel(excel_path, index=False)
     
     return {"extracted_data": data}
 
+# Define the graph
 builder = StateGraph(ResumePathState)
 builder.add_node("process", load_and_extract)
 builder.set_entry_point("process")
