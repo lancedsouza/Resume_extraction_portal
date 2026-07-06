@@ -6,10 +6,5 @@ pypdf
 pandas
 openpyxl
 python-dotenv
-redis
-rq
-filelock
-unstructured
-python-magic
-poppler-utils
-pytesseract
+tenacity
+python-docx
