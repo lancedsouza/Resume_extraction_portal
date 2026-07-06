@@ -1,12 +1,15 @@
-version: "3.8"
-
 services:
+  redis:
+    image: redis:alpine
+  
   app:
     build: .
-    command: streamlit run app.py --server.port=8501
-    ports:
-      - "8501:8501"
-    env_file:
-      - .env
-    volumes:
-      - ./data:/app/data
+    command: streamlit run app.py
+    ports: ["8501:8501"]
+    volumes: [".:/app", "./data:/app/data"]
+  
+  worker:
+    build: .
+    command: python worker.py
+    volumes: [".:/app", "./data:/app/data"]
+    depends_on: [redis]
