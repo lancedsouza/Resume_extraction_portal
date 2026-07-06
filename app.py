@@ -8,8 +8,8 @@ import time
 import traceback
 
 
-if not os.getenv("GROQ_API_KEY"):
-    os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
+if not os.getenv("GEMINI_API_KEY"):
+    os.environ["GEMINI_API_KEY"] = st.secrets["GEMINI_API_KEY"]
 
 from processing import pipeline
 
