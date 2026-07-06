@@ -7,6 +7,7 @@ from langchain_groq import ChatGroq
 from langgraph.graph import StateGraph, END
 from typing import TypedDict
 from dotenv import load_dotenv
+from docx import Document as DocxDocument
 
 load_dotenv()
 
@@ -21,10 +22,24 @@ class ResumePathState(TypedDict):
     resume_text: str
     extracted_data: dict
 
-def load_pdf(state: ResumePathState) -> dict:
-    loader = PyPDFLoader(state["file_path"])
-    pages = loader.load()
-    text = "\n".join([page.page_content for page in pages])
+def load_file(state: ResumePathState) -> dict:
+    path = Path(state["file_path"])
+
+    if path.suffix.lower() == ".pdf":
+        loader = PyPDFLoader(str(path))
+        pages = loader.load()
+        text = "\n".join([page.page_content for page in pages])
+
+    elif path.suffix.lower() in [".docx", ".doc"]:
+        doc = DocxDocument(str(path))
+        text = "\n".join([
+            para.text for para in doc.paragraphs
+            if para.text.strip()
+        ])
+
+    else:
+        raise ValueError(f"Unsupported file type: {path.suffix}")
+
     return {"resume_text": text}
 
 def extract_data(state: ResumePathState) -> dict:
@@ -46,8 +61,9 @@ Return exactly this structure:
 }}
 
 Rules:
-- "name" must be the actual person's full name, NOT a headline like "Accomplished Finance Professional".
-  Look for the name near the contact number or email at the top of the resume.
+- "name" must be the actual person's full name, NOT a headline like
+  "Accomplished Finance Professional". Look for the name near the
+  contact number or email at the top of the resume.
 - Work_experience must be an integer (total years across all roles).
 - If a field is missing use empty string "".
 
@@ -66,10 +82,11 @@ Resume:
         data["Work_experience"] = 0
     return {"extracted_data": data}
 
+# --- GRAPH ---
 graph = StateGraph(ResumePathState)
-graph.add_node("load_pdf", load_pdf)
+graph.add_node("load_file", load_file)
 graph.add_node("extract_data", extract_data)
-graph.set_entry_point("load_pdf")
-graph.add_edge("load_pdf", "extract_data")
+graph.set_entry_point("load_file")
+graph.add_edge("load_file", "extract_data")
 graph.add_edge("extract_data", END)
 pipeline = graph.compile()
