@@ -1,10 +1,27 @@
+version: "3.8"
+
 services:
-  resume-portal:
+  redis:
+    image: redis:alpine
+
+  app:
     build: .
+    command: streamlit run app.py --server.port=8501
     ports:
       - "8501:8501"
-    volumes:
-      - ./data:/app/data  # Persists your Excel file to your host machine
     env_file:
       - .env
-    restart: always
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - redis
+
+  worker:
+    build: .
+    command: python worker.py
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - redis

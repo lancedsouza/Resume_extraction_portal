@@ -1,12 +1,15 @@
 streamlit
-langgraph
 langchain-groq
 langchain-community
+langgraph
+pypdf
 pandas
 openpyxl
-pypdf
 python-dotenv
-docx2pdf
+redis
+rq
+filelock
 unstructured
-python-magic  # Required for detecting file types
-docx2txt
+python-magic
+poppler-utils
+pytesseract

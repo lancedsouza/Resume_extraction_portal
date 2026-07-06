@@ -1,174 +1,57 @@
-# import streamlit as st
-# import subprocess
-# import os
-# import pandas as pd
-# from pathlib import Path
-# from io import BytesIO
-# from processing import pipeline  # import your compiled graph from data.py
-
-# st.set_page_config(page_title="Manalot Resume Processor", layout="wide")
-# st.title("📄 Resume Extraction Portal")
-
-# uploaded_files = st.file_uploader(
-#     "Upload Resumes (PDF/Word)",
-#     accept_multiple_files=True,
-#     type=['pdf', 'docx', 'doc']
-# )
-
-# if st.button("Process Resumes"):
-#     if not uploaded_files:
-#         st.warning("Please upload files first.")
-#     else:
-#         results = []
-#         errors = []
-
-#         with st.spinner("Processing..."):
-#             for uploaded_file in uploaded_files:
-#                 try:
-#                     # 1. Save to temp file
-#                     temp_path = Path(f"temp_{uploaded_file.name}")
-#                     with open(temp_path, "wb") as f:
-#                         f.write(uploaded_file.getbuffer())
-
-#                     # 2. Convert Word to PDF if needed
-#                     final_path = temp_path
-#                     if temp_path.suffix in [".docx", ".doc"]:
-#                         subprocess.run(
-#                             ['soffice', '--headless', '--convert-to', 'pdf', str(temp_path)],
-#                             check=True
-#                         )
-#                         final_path = Path(str(temp_path).rsplit('.', 1)[0] + ".pdf")
-
-#                     # 3. Run pipeline
-#                     res = pipeline.invoke({"file_path": str(final_path)})
-#                     results.append(res["extracted_data"])
-#                     st.success(f"✓ {uploaded_file.name}")
-
-#                 except Exception as e:
-#                     errors.append(f"✗ {uploaded_file.name}: {str(e)}")
-#                     st.error(f"Failed: {uploaded_file.name}")
-
-#                 finally:
-#                     # 4. Cleanup temp files always
-#                     if temp_path.exists():
-#                         os.remove(temp_path)
-#                     if final_path != temp_path and final_path.exists():
-#                         os.remove(final_path)
-
-#         if errors:
-#             st.warning(f"{len(errors)} file(s) failed. Check errors above.")
-
-#         if results:
-#             # 5. Build Excel and offer download
-#             df = pd.DataFrame(results)
-#             st.dataframe(df)   # preview in UI
-
-#             buffer = BytesIO()
-#             df.to_excel(buffer, index=False)
-#             buffer.seek(0)     # ← critical
-
-#             st.download_button(
-#                 label="⬇️ Download Master Excel",
-#                 data=buffer,
-#                 file_name="extracted_resumes.xlsx",
-#                 mime="application/vnd.ms-excel"
-#             )
-
 import streamlit as st
-import subprocess
-import os
 import pandas as pd
+from redis import Redis
+from rq import Queue
 from pathlib import Path
-from io import BytesIO
-from processing import pipeline
-import time
+import os
 
-# API key check for Streamlit Cloud
-if not os.getenv("GROQ_API_KEY"):
-    os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
+REDIS_HOST = os.getenv("REDIS_HOST", "redis")
+redis_conn = Redis(host=REDIS_HOST, port=6379)
+q = Queue("resume_tasks", connection=redis_conn)
 
-st.set_page_config(page_title="Manalot Resume Processor", layout="wide")
+DATA_DIR = Path("/app/data")
+EXCEL_PATH = DATA_DIR / "master_resume_data.xlsx"
+DATA_DIR.mkdir(exist_ok=True)
+
+st.set_page_config(page_title="Manalot AI Portal", layout="wide")
 st.title("📄 Resume Extraction Portal")
 
-uploaded_files = st.file_uploader(
-    "Upload Resumes (PDF/Word)",
-    accept_multiple_files=True,
-    type=['pdf', 'docx', 'doc']
-)
+tab1, tab2 = st.tabs(["📤 Upload & Queue", "📊 View Master Database"])
 
-if st.button("Process Resumes"):
-    if not uploaded_files:
-        st.warning("Please upload files first.")
-    else:
-        results = []
-        errors = []
+with tab1:
+    st.subheader("Submit Resumes for Processing")
+    uploaded_files = st.file_uploader(
+        "Upload Resumes (PDF/Word)",
+        accept_multiple_files=True,
+        type=["pdf", "docx", "doc"]
+    )
 
-        with st.spinner("Processing..."):
-            for uploaded_file in uploaded_files:
-                time.sleep(1.0)  # slight delay to avoid overwhelming the system
-                temp_path = Path(f"temp_{uploaded_file.name}")
-                final_path = temp_path
-                try:
-                    with open(temp_path, "wb") as f:
-                        f.write(uploaded_file.getbuffer())
+    if st.button("🚀 Submit to Queue"):
+        if not uploaded_files:
+            st.warning("Please upload files first.")
+        else:
+            for f in uploaded_files:
+                save_path = DATA_DIR / f.name
+                with open(save_path, "wb") as out:
+                    out.write(f.getbuffer())
+                q.enqueue("worker.pipeline_wrapper", str(save_path))
 
-                    if temp_path.suffix in [".docx", ".doc"]:
-                        subprocess.run(
-                            ['soffice', '--headless', '--convert-to', 'pdf', str(temp_path)],
-                            check=True
-                        )
-                        final_path = Path(str(temp_path).rsplit('.', 1)[0] + ".pdf")
+            st.success(f"Queued {len(uploaded_files)} file(s). Check the database tab once done.")
 
-                    res = pipeline.invoke({"file_path": str(temp_path)})
-                    results.append(res["extracted_data"])
-                    st.success(f"✓ {uploaded_file.name}")
+with tab2:
+    st.subheader("Master Resume Database")
+    if st.button("🔄 Refresh"):
+        if EXCEL_PATH.exists():
+            df = pd.read_excel(EXCEL_PATH)
+            st.dataframe(df, use_container_width=True)
+            with open(EXCEL_PATH, "rb") as f:
+                st.download_button(
+                    "⬇️ Download Master Excel",
+                    f,
+                    "master_extracted_data.xlsx"
+                )
+        else:
+            st.info("No data yet — wait for workers to finish.")
 
-                except Exception as e:
-                    errors.append(str(e))
-                    st.error(f"✗ {uploaded_file.name}: {str(e)}")
-
-                finally:
-                    if temp_path.exists(): os.remove(temp_path)
-                    if final_path != temp_path and final_path.exists(): os.remove(final_path)
-
-        if errors:
-            st.warning(f"{len(errors)} file(s) failed.")
-
-        if results:
-            # Build two rows per candidate
-            rows = []
-            for i, data in enumerate(results, start=1):
-                rows.append({
-                    "Sr No": i,
-                    "Name": data["name"],
-                    "Company": data["Company_1"],
-                    "Designation": data["Designation_1"],
-                    "Work Experience": data["Work_experience"],
-                    "Location": data["Location"],
-                    "Contact": data["Contact_no"],
-                    "Email": data["email"]
-                })
-                rows.append({
-                    "Sr No": None,
-                    "Name": None,
-                    "Company": data["Company_2"],
-                    "Designation": data["Designation_2"],
-                    "Work Experience": None,
-                    "Location": None,
-                    "Contact": None,
-                    "Email": None
-                })
-
-            df = pd.DataFrame(rows)
-            st.dataframe(df)
-
-            buffer = BytesIO()
-            df.to_excel(buffer, index=False)
-            buffer.seek(0)
-
-            st.download_button(
-                label="⬇️ Download Master Excel",
-                data=buffer,
-                file_name="extracted_resumes.xlsx",
-                mime="application/vnd.ms-excel"
-            )
+st.sidebar.title("System Status")
+st.sidebar.metric("Tasks in Queue", len(q))
