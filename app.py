@@ -1,25 +1,80 @@
 import streamlit as st
-import uuid
-from redis import Redis
-from rq import Queue
+import pandas as pd
 from pathlib import Path
+import os
+import time
+from processing import pipeline
 
-# Setup Redis connection
-redis_conn = Redis(host='redis', port=6379)
-q = Queue('resume_tasks', connection=redis_conn)
+# Configure Page
+st.set_page_config(page_title="Manalot | AI Resume Scout", layout="wide")
 
-st.title("🚀 Manalot AI Portal (Production)")
+# Custom CSS for a professional look
+st.markdown("""
+    <style>
+    .main { background-color: #f8f9fa; }
+    .stButton>button { width: 100%; border-radius: 5px; height: 3em; background: #007bff; color: white; }
+    </style>
+    """, unsafe_allow_html=True)
 
-uploaded_files = st.file_uploader("Upload Resumes", accept_multiple_files=True)
+st.title("📄 Manalot AI Resume Scout")
+st.markdown("Upload your resumes, and our AI will extract the key data for your recruitment database.")
 
-if st.button("Submit to Queue"):
-    for f in uploaded_files:
-        save_path = Path("/app/data") / f"{uuid.uuid4()}_{f.name}"
-        with open(save_path, "wb") as out:
-            out.write(f.getbuffer())
-        q.enqueue('processing.pipeline_wrapper', str(save_path))
-    st.success(f"Queued {len(uploaded_files)} files!")
+# Initialize Session State for results
+if 'results' not in st.session_state:
+    st.session_state.results = []
 
-if st.button("Refresh Data"):
-    if Path("/app/data/master_resume_data.xlsx").exists():
-        st.dataframe(pd.read_excel("/app/data/master_resume_data.xlsx"))
+# Sidebar for controls
+with st.sidebar:
+    st.header("System Settings")
+    st.info("Current Model: Gemini 2.0 Flash")
+    if st.button("Clear History"):
+        st.session_state.results = []
+        st.rerun()
+
+# Main Upload Area
+uploaded_files = st.file_uploader(
+    "Drag and drop resumes here", 
+    accept_multiple_files=True, 
+    type=['pdf', 'docx', 'doc']
+)
+
+# Processing Logic
+if st.button("🚀 Start Extraction"):
+    if not uploaded_files:
+        st.warning("Please upload files first.")
+    else:
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        for i, file in enumerate(uploaded_files):
+            status_text.text(f"Analyzing {file.name} ({i+1}/{len(uploaded_files)})...")
+            
+            # Create temp file
+            temp_path = Path(f"temp_{file.name}")
+            with open(temp_path, "wb") as f:
+                f.write(file.getbuffer())
+            
+            try:
+                # Run Pipeline
+                res = pipeline.invoke({"file_path": str(temp_path)})
+                st.session_state.results.append(res["extracted_data"])
+                st.success(f"Processed: {file.name}")
+            except Exception as e:
+                st.error(f"Failed to process {file.name}: {e}")
+            finally:
+                if temp_path.exists(): os.remove(temp_path)
+                
+            # Update Progress
+            progress_bar.progress((i + 1) / len(uploaded_files))
+            
+        status_text.text("Extraction Complete!")
+
+# Display Results Table
+if st.session_state.results:
+    st.subheader("Extracted Data")
+    df = pd.DataFrame(st.session_state.results)
+    st.dataframe(df, use_container_width=True)
+    
+    # Download Button
+    csv = df.to_csv(index=False).encode('utf-8')
+    st.download_button("⬇️ Download CSV", csv, "extracted_resumes.csv", "text/csv")
