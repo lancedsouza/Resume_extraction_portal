@@ -1,11 +1,8 @@
 streamlit
-langchain-groq
-langchain-community
+langchain-google-genai
 langgraph
-pypdf
+pdfplumber
 pandas
 openpyxl
 python-dotenv
-tenacity
 mammoth
-pdfplumber

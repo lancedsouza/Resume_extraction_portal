@@ -5,18 +5,22 @@ import time
 import mammoth
 import pdfplumber
 from pathlib import Path
-from langchain_groq import ChatGroq
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import StateGraph, END
 from typing import TypedDict
 from dotenv import load_dotenv
 
 load_dotenv()
 
-api_key = os.getenv("GEMINI_API_KEY")
-if not api_key:
+gemini_key = os.getenv("GEMINI_API_KEY")
+if not gemini_key:
     raise ValueError("GEMINI_API_KEY not found")
 
-llm = ChatGroq(model="llama-3.1-8b-instant", api_key=api_key, temperature=0)
+llm = ChatGoogleGenerativeAI(
+    model="gemini-2.0-flash",
+    google_api_key=gemini_key,
+    temperature=0
+)
 
 class ResumePathState(TypedDict):
     file_path: str
@@ -27,11 +31,10 @@ def load_file(state: ResumePathState) -> dict:
     path = Path(state["file_path"])
 
     if path.suffix.lower() == ".pdf":
-        # pdfplumber handles multi-column layouts better than PyPDFLoader
         text_parts = []
         with pdfplumber.open(str(path)) as pdf:
             for page in pdf.pages:
-                text = page.extract_text(layout=True)  # layout=True preserves columns
+                text = page.extract_text(layout=True)
                 if text:
                     text_parts.append(text)
         text = "\n".join(text_parts)
@@ -69,15 +72,15 @@ Return exactly this structure:
 
 Rules:
 - "name" must be the actual person's full name e.g. "Nirzara Awati".
-  NOT a headline like "HR Manager" or "Accomplished Professional".
-  Look near the top of the resume, close to email and phone number.
+  NOT a headline like "HR Manager". Look near the top of the resume,
+  close to email and phone number.
 - Work_experience must be an integer (total years across all roles).
 - If a field is missing use empty string "".
 
 Resume:
 {state['resume_text']}
 """
-    for attempt in range(5):
+    for attempt in range(3):
         try:
             response = llm.invoke(prompt)
             raw = response.content
@@ -92,13 +95,12 @@ Resume:
             return {"extracted_data": data}
 
         except Exception as e:
-            if "rate_limit" in str(e).lower() or "429" in str(e):
-                wait = (attempt + 1) * 15
-                time.sleep(wait)
+            if "429" in str(e) or "quota" in str(e).lower():
+                time.sleep((attempt + 1) * 10)
                 continue
             raise
 
-    raise RuntimeError("Failed after 5 retries — rate limit")
+    raise RuntimeError("Failed after 3 retries")
 
 # --- GRAPH ---
 graph = StateGraph(ResumePathState)
