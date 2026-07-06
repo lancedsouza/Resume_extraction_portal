@@ -1,57 +1,105 @@
 import streamlit as st
-import pandas as pd
-from redis import Redis
-from rq import Queue
-from pathlib import Path
+import subprocess
 import os
+import pandas as pd
+from pathlib import Path
+from io import BytesIO
+import tempfile
+import time
 
-REDIS_HOST = os.getenv("REDIS_HOST", "redis")
-redis_conn = Redis(host=REDIS_HOST, port=6379)
-q = Queue("resume_tasks", connection=redis_conn)
+# API key — works both locally and on Streamlit Cloud
+if not os.getenv("GROQ_API_KEY"):
+    os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
 
-DATA_DIR = Path("/app/data")
-EXCEL_PATH = DATA_DIR / "master_resume_data.xlsx"
-DATA_DIR.mkdir(exist_ok=True)
+from processing import pipeline
 
 st.set_page_config(page_title="Manalot AI Portal", layout="wide")
 st.title("📄 Resume Extraction Portal")
 
-tab1, tab2 = st.tabs(["📤 Upload & Queue", "📊 View Master Database"])
+uploaded_files = st.file_uploader(
+    "Upload Resumes (PDF/Word)",
+    accept_multiple_files=True,
+    type=["pdf", "docx", "doc"]
+)
 
-with tab1:
-    st.subheader("Submit Resumes for Processing")
-    uploaded_files = st.file_uploader(
-        "Upload Resumes (PDF/Word)",
-        accept_multiple_files=True,
-        type=["pdf", "docx", "doc"]
-    )
+if st.button("🚀 Process Resumes"):
+    if not uploaded_files:
+        st.warning("Please upload files first.")
+    else:
+        results = []
+        errors = []
+        progress = st.progress(0)
+        status = st.empty()
 
-    if st.button("🚀 Submit to Queue"):
-        if not uploaded_files:
-            st.warning("Please upload files first.")
-        else:
-            for f in uploaded_files:
-                save_path = DATA_DIR / f.name
-                with open(save_path, "wb") as out:
-                    out.write(f.getbuffer())
-                q.enqueue("worker.pipeline_wrapper", str(save_path))
+        for i, f in enumerate(uploaded_files):
+            status.text(f"Processing {f.name}...")
 
-            st.success(f"Queued {len(uploaded_files)} file(s). Check the database tab once done.")
+            suffix = Path(f.name).suffix
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                tmp.write(f.getbuffer())
+                tmp_path = Path(tmp.name)
 
-with tab2:
-    st.subheader("Master Resume Database")
-    if st.button("🔄 Refresh"):
-        if EXCEL_PATH.exists():
-            df = pd.read_excel(EXCEL_PATH)
+            pdf_path = tmp_path
+            try:
+                # Convert Word to PDF if needed
+                if suffix in [".docx", ".doc"]:
+                    subprocess.run(
+                        ['soffice', '--headless', '--convert-to', 'pdf', str(tmp_path)],
+                        check=True
+                    )
+                    pdf_path = tmp_path.with_suffix(".pdf")
+
+                res = pipeline.invoke({"file_path": str(pdf_path)})
+                results.append(res["extracted_data"])
+                st.success(f"✓ {f.name}")
+
+            except Exception as e:
+                errors.append(f.name)
+                st.error(f"✗ {f.name}: {str(e)}")
+
+            finally:
+                if tmp_path.exists(): tmp_path.unlink()
+                if pdf_path != tmp_path and pdf_path.exists(): pdf_path.unlink()
+
+            progress.progress((i + 1) / len(uploaded_files))
+            time.sleep(1)  # avoid rate limits
+
+        status.text("Done!")
+
+        if errors:
+            st.warning(f"{len(errors)} file(s) failed.")
+
+        if results:
+            rows = []
+            for i, data in enumerate(results, start=1):
+                rows.append({
+                    "Sr No": i,
+                    "Name": data["name"],
+                    "Company": data["Company_1"],
+                    "Designation": data["Designation_1"],
+                    "Work Experience": data["Work_experience"],
+                    "Location": data["Location"],
+                    "Contact": data["Contact_no"],
+                    "Email": data["email"]
+                })
+                rows.append({
+                    "Sr No": None, "Name": None,
+                    "Company": data["Company_2"],
+                    "Designation": data["Designation_2"],
+                    "Work Experience": None, "Location": None,
+                    "Contact": None, "Email": None
+                })
+
+            df = pd.DataFrame(rows)
             st.dataframe(df, use_container_width=True)
-            with open(EXCEL_PATH, "rb") as f:
-                st.download_button(
-                    "⬇️ Download Master Excel",
-                    f,
-                    "master_extracted_data.xlsx"
-                )
-        else:
-            st.info("No data yet — wait for workers to finish.")
 
-st.sidebar.title("System Status")
-st.sidebar.metric("Tasks in Queue", len(q))
+            buffer = BytesIO()
+            df.to_excel(buffer, index=False)
+            buffer.seek(0)
+
+            st.download_button(
+                "⬇️ Download Master Excel",
+                buffer,
+                "extracted_resumes.xlsx",
+                "application/vnd.ms-excel"
+            )
