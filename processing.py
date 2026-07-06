@@ -139,8 +139,13 @@ def load_and_extract(state: ResumePathState) -> dict:
     match = re.search(r'\{.*\}', response, re.DOTALL)
     data = json.loads(match.group()) if match else {}
     
-    # Save to Excel (The Worker's job!)
-    excel_path = Path("/app/data/master_resume_data.xlsx")
+    # --- FIXED PATHING ---
+    # Create the 'data' directory if it doesn't exist
+    data_dir = Path("data")
+    data_dir.mkdir(exist_ok=True)
+    excel_path = data_dir / "master_resume_data.xlsx"
+    # ---------------------
+    
     new_data = pd.DataFrame([data])
     if excel_path.exists():
         df = pd.concat([pd.read_excel(excel_path), new_data], ignore_index=True)
