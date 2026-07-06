@@ -1,9 +1,10 @@
 import json
 import re
 import os
+import time
 import mammoth
+import pdfplumber
 from pathlib import Path
-from langchain_community.document_loaders import PyPDFLoader
 from langchain_groq import ChatGroq
 from langgraph.graph import StateGraph, END
 from typing import TypedDict
@@ -26,9 +27,14 @@ def load_file(state: ResumePathState) -> dict:
     path = Path(state["file_path"])
 
     if path.suffix.lower() == ".pdf":
-        loader = PyPDFLoader(str(path))
-        pages = loader.load()
-        text = "\n".join([page.page_content for page in pages])
+        # pdfplumber handles multi-column layouts better than PyPDFLoader
+        text_parts = []
+        with pdfplumber.open(str(path)) as pdf:
+            for page in pdf.pages:
+                text = page.extract_text(layout=True)  # layout=True preserves columns
+                if text:
+                    text_parts.append(text)
+        text = "\n".join(text_parts)
 
     elif path.suffix.lower() in [".docx", ".doc"]:
         with open(str(path), "rb") as f:
@@ -39,7 +45,7 @@ def load_file(state: ResumePathState) -> dict:
         raise ValueError(f"Unsupported file type: {path.suffix}")
 
     if not text.strip():
-        raise ValueError(f"No text extracted from {path.name} — may be scanned or image-based")
+        raise ValueError(f"No text extracted from {path.name}")
 
     return {"resume_text": text}
 
@@ -62,26 +68,37 @@ Return exactly this structure:
 }}
 
 Rules:
-- "name" must be the actual person's full name, NOT a headline like
-  "Accomplished Finance Professional". Look for the name near the
-  contact number or email at the top of the resume.
+- "name" must be the actual person's full name e.g. "Nirzara Awati".
+  NOT a headline like "HR Manager" or "Accomplished Professional".
+  Look near the top of the resume, close to email and phone number.
 - Work_experience must be an integer (total years across all roles).
 - If a field is missing use empty string "".
 
 Resume:
 {state['resume_text']}
 """
-    response = llm.invoke(prompt)
-    raw = response.content
-    match = re.search(r'\{.*\}', raw, re.DOTALL)
-    if not match:
-        raise ValueError(f"No JSON found: {raw}")
-    data = json.loads(match.group())
-    try:
-        data["Work_experience"] = int(str(data["Work_experience"]).strip())
-    except (ValueError, TypeError):
-        data["Work_experience"] = 0
-    return {"extracted_data": data}
+    for attempt in range(5):
+        try:
+            response = llm.invoke(prompt)
+            raw = response.content
+            match = re.search(r'\{.*\}', raw, re.DOTALL)
+            if not match:
+                raise ValueError(f"No JSON found: {raw}")
+            data = json.loads(match.group())
+            try:
+                data["Work_experience"] = int(str(data["Work_experience"]).strip())
+            except (ValueError, TypeError):
+                data["Work_experience"] = 0
+            return {"extracted_data": data}
+
+        except Exception as e:
+            if "rate_limit" in str(e).lower() or "429" in str(e):
+                wait = (attempt + 1) * 15
+                time.sleep(wait)
+                continue
+            raise
+
+    raise RuntimeError("Failed after 5 retries — rate limit")
 
 # --- GRAPH ---
 graph = StateGraph(ResumePathState)
