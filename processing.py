@@ -256,13 +256,14 @@
 
 # # NOTE: DO NOT put "from processing import pipeline" at the bottom of this file!
 
-# code from Gemini
-import json, re, os, mammoth, pdfplumber
+# code from Geminiimport json, re, os, mammoth, pdfplumber
 from pathlib import Path
 from langchain_groq import ChatGroq
 from langgraph.graph import StateGraph, END
 from typing import TypedDict
+import regex as re
 
+# Initialize Groq
 llm = ChatGroq(model="llama-3.1-8b-instant", api_key=os.getenv("GROQ_API_KEY"))
 
 class ResumePathState(TypedDict):
@@ -273,28 +274,34 @@ def load_and_extract(state: ResumePathState) -> dict:
     path = Path(state["file_path"])
     text = ""
     
-    if path.suffix.lower() == ".pdf":
-        with pdfplumber.open(str(path)) as pdf:
-            text = "\n".join([page.extract_text() or "" for page in pdf.pages])
-    elif path.suffix.lower() in [".docx", ".doc"]:
-        with open(str(path), "rb") as f:
-            text = mammoth.extract_raw_text(f).value
-            
-    MAX_CHARS = 15000 
-    prompt = f"Extract resume info to JSON (ensure strict double quotes). Return ONLY JSON: {text[:MAX_CHARS]}"
+    # 1. Text Extraction
+    try:
+        if path.suffix.lower() == ".pdf":
+            with pdfplumber.open(str(path)) as pdf:
+                text = "\n".join([p.extract_text() or "" for p in pdf.pages])
+        elif path.suffix.lower() in [".docx", ".doc"]:
+            with open(str(path), "rb") as f:
+                text = mammoth.extract_raw_text(f).value
+    except Exception as e:
+        return {"extracted_data": {"error": f"Load failed: {str(e)}"}}
+
+    # 2. Strict JSON Extraction
+    prompt = f"""
+    Extract resume info. Return ONLY pure JSON. No markdown, no intro.
+    Schema: {{"name": "str", "email": "str", "contact": "str", "location": "str", "total_experience_years": "str", "company_1": "str", "designation_1": "str", "company_2": "str", "designation_2": "str"}}
+    Text: {text[:12000]}
+    """
+    
     response = llm.invoke(prompt).content
     
-    # JSON REPAIRMAN
-    try:
-        match = re.search(r'\{.*\}', response, re.DOTALL)
-        data = json.loads(match.group())
-    except:
-        fix_prompt = f"Fix this broken JSON and return only valid JSON: {response}"
-        fixed_response = llm.invoke(fix_prompt).content
-        match = re.search(r'\{.*\}', fixed_response, re.DOTALL)
-        data = json.loads(match.group()) if match else {}
-        
-    return {"extracted_data": data}
+    # Regex to extract JSON block
+    match = re.search(r'\{.*\}', response, re.DOTALL)
+    if match:
+        try:
+            return {"extracted_data": json.loads(match.group())}
+        except:
+            return {"extracted_data": {"error": "JSON Parse Error"}}
+    return {"extracted_data": {"error": "No JSON found"}}
 
 builder = StateGraph(ResumePathState)
 builder.add_node("extract", load_and_extract)

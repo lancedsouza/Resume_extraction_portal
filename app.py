@@ -276,13 +276,16 @@ from pathlib import Path
 from io import BytesIO
 from processing import pipeline
 
-st.set_page_config(page_title="Resume Extraction Portal", layout="wide")
+st.set_page_config(page_title="Resume Portal", layout="wide")
 st.title("📄 Resume Extraction Portal")
+
+if "results" not in st.session_state:
+    st.session_state.results = []
 
 uploaded_files = st.file_uploader("Upload Resumes", accept_multiple_files=True, type=["pdf", "docx", "doc"])
 
 if st.button("🚀 Process Resumes"):
-    results = []
+    st.session_state.results = [] # Reset on new run
     progress = st.progress(0)
     
     for i, f in enumerate(uploaded_files):
@@ -292,36 +295,33 @@ if st.button("🚀 Process Resumes"):
         
         try:
             res = pipeline.invoke({"file_path": tmp_path})
-            results.append(res["extracted_data"])
-            st.success(f"✓ {f.name}")
-            time.sleep(1) # Rate limit protection
+            data = res["extracted_data"]
+            
+            if "error" in data:
+                st.error(f"✗ {f.name}: {data['error']}")
+            else:
+                st.session_state.results.append(data)
+                st.success(f"✓ {f.name}")
+            
+            time.sleep(6) # Sufficiently slow for free tier
         except Exception as e:
-            st.error(f"✗ {f.name}: {e}")
+            st.error(f"Critical Error on {f.name}: {e}")
         finally:
             if os.path.exists(tmp_path): os.remove(tmp_path)
+            
         progress.progress((i + 1) / len(uploaded_files))
 
-    if results:
-        # VERTICAL STACKING LOGIC
-        rows = []
-        for r in results:
-            # Row 1: Recent
-            rows.append({
-                "Name": r.get("name"), "Email": r.get("email"), 
-                "Total Exp": r.get("total_experience_years"),
-                "Company": r.get("company_1"), "Designation": r.get("designation_1")
-            })
-            # Row 2: Previous
-            rows.append({
-                "Name": "", "Email": "", "Total Exp": "",
-                "Company": r.get("company_2"), "Designation": r.get("designation_2")
-            })
-        
-        df = pd.DataFrame(rows).astype(str)
-        st.dataframe(df, width='stretch')
-
-        buffer = BytesIO()
-        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-            df.to_excel(writer, index=False)
-        
-        st.download_button("⬇️ Download Excel", buffer.getvalue(), "resumes.xlsx")
+if st.session_state.results:
+    # Build Stacked Rows
+    rows = []
+    for r in st.session_state.results:
+        rows.append({"Name": r.get("name"), "Email": r.get("email"), "Company": r.get("company_1"), "Designation": r.get("designation_1"), "Exp": r.get("total_experience_years")})
+        rows.append({"Name": "", "Email": "", "Company": r.get("company_2"), "Designation": r.get("designation_2"), "Exp": ""})
+    
+    df = pd.DataFrame(rows)
+    st.dataframe(df, width='stretch')
+    
+    buffer = BytesIO()
+    with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False)
+    st.download_button("⬇️ Download Excel", buffer.getvalue(), "resumes.xlsx")
