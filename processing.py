@@ -256,7 +256,8 @@
 
 # # NOTE: DO NOT put "from processing import pipeline" at the bottom of this file!
 
-# code from Geminiimport json, re, os, mammoth, pdfplumber
+# code from Gemini
+import json, re, os, mammoth, pdfplumber
 from pathlib import Path
 from langchain_groq import ChatGroq
 from langgraph.graph import StateGraph, END
