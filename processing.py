@@ -73,13 +73,13 @@ from pathlib import Path
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import StateGraph, END
 from typing import TypedDict
+from pypdf import PdfReader
 
 llm = ChatGoogleGenerativeAI(
-    model="gemini-2.0-flash",
+    model="gemini-2.0-flash-lite",  # ← faster
     google_api_key=os.getenv("GEMINI_API_KEY"),
     temperature=0
 )
-
 class ResumePathState(TypedDict):
     file_path: str
     extracted_data: dict
@@ -89,8 +89,8 @@ def load_and_extract(state: ResumePathState) -> dict:
     text = ""
 
     if path.suffix.lower() == ".pdf":
-        with pdfplumber.open(str(path)) as pdf:
-            text = "\n".join([page.extract_text() or "" for page in pdf.pages])
+       reader = PdfReader(str(path))
+       text = "\n".join([page.extract_text() or "" for page in reader.pages])
 
     elif path.suffix.lower() in [".docx", ".doc"]:
         with open(str(path), "rb") as f:
@@ -123,7 +123,7 @@ Critical rules:
 - If a field is missing use empty string ""
 
 Resume:
-{text[:10000]}
+{text[:5000]}  # was 10000
 """
     for attempt in range(3):
         try:
