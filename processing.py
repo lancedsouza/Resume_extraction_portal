@@ -256,8 +256,67 @@
 
 # # NOTE: DO NOT put "from processing import pipeline" at the bottom of this file!
 
-# code from Gemini
-import os, json, re, mammoth, pdfplumber, time
+# # code from Gemini
+# import os, json, re, mammoth, pdfplumber, time
+# from pathlib import Path
+# from langchain_groq import ChatGroq
+# from langgraph.graph import StateGraph, END
+# from typing import TypedDict
+
+# llm = ChatGroq(model="llama-3.1-8b-instant", api_key=os.getenv("GROQ_API_KEY"))
+
+# class ResumePathState(TypedDict):
+#     file_path: str
+#     extracted_data: dict
+
+# def load_and_extract(state: ResumePathState) -> dict:
+#     path = Path(state["file_path"])
+#     text = ""
+#     if path.suffix.lower() == ".pdf":
+#         with pdfplumber.open(str(path)) as pdf:
+#             text = "\n".join([p.extract_text() or "" for p in pdf.pages])
+#     elif path.suffix.lower() in [".docx", ".doc"]:
+#         with open(str(path), "rb") as f:
+#             text = mammoth.extract_raw_text(f).value
+            
+#     prompt = f"""
+#     Extract resume details. Return ONLY pure JSON.
+#     Location must be the City only. 
+#     Capture the 2 most recent roles:
+#     1. 'recent_company', 'recent_designation'
+#     2. 'previous_company', 'previous_designation'
+    
+#     JSON Schema:
+#     {{
+#         "name": "Full Name",
+#         "email": "Email",
+#         "location": "City only",
+#         "total_experience": "Exact string",
+#         "recent_company": "str",
+#         "recent_designation": "str",
+#         "previous_company": "str",
+#         "previous_designation": "str"
+#     }}
+#     Text: {text[:10000]}
+#     """
+    
+#     response = llm.invoke(prompt).content
+#     json_str = re.sub(r'[\s\S]*?(\{[\s\S]*\})[\s\S]*', r'\1', response)
+#     try:
+#         return {"extracted_data": json.loads(json_str)}
+#     except:
+#         return {"extracted_data": {"error": "JSON Parse Error"}}
+
+# builder = StateGraph(ResumePathState)
+# builder.add_node("extract", load_and_extract)
+# builder.set_entry_point("extract")
+# builder.add_edge("extract", END)
+# pipeline = builder.compile()
+
+# def pipeline_wrapper(file_path):
+#     return pipeline.invoke({"file_path": file_path})
+# code from Gemini matched to Anil's excel
+import os, json, re, mammoth, pdfplumber
 from pathlib import Path
 from langchain_groq import ChatGroq
 from langgraph.graph import StateGraph, END
@@ -280,23 +339,13 @@ def load_and_extract(state: ResumePathState) -> dict:
             text = mammoth.extract_raw_text(f).value
             
     prompt = f"""
-    Extract resume details. Return ONLY pure JSON.
-    Location must be the City only. 
-    Capture the 2 most recent roles:
-    1. 'recent_company', 'recent_designation'
-    2. 'previous_company', 'previous_designation'
+    Extract resume details into STRICT JSON. 
+    Location: City only.
+    Experience: Total years.
+    2 most recent roles: 'recent_company', 'recent_designation', 'prev_company', 'prev_designation'.
     
     JSON Schema:
-    {{
-        "name": "Full Name",
-        "email": "Email",
-        "location": "City only",
-        "total_experience": "Exact string",
-        "recent_company": "str",
-        "recent_designation": "str",
-        "previous_company": "str",
-        "previous_designation": "str"
-    }}
+    {{"name": "Name", "email": "Email", "location": "City", "total_exp": "Years", "recent_company": "Comp", "recent_designation": "Desig", "prev_company": "Comp", "prev_designation": "Desig"}}
     Text: {text[:10000]}
     """
     

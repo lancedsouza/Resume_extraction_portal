@@ -269,7 +269,60 @@
 #     csv = df.to_csv(index=False).encode('utf-8')
 #     st.download_button("⬇️ Download CSV", csv, "results.csv", "text/csv")
 
-# Code from Gemini
+# # Code from Gemini
+# import streamlit as st
+# import os, time, tempfile, pandas as pd
+# from io import BytesIO
+# from processing import pipeline
+
+# st.set_page_config(page_title="Resume Portal", layout="wide")
+# st.title("📄 Resume Extraction Portal")
+
+# if "results" not in st.session_state: st.session_state.results = []
+
+# uploaded_files = st.file_uploader("Upload Resumes", accept_multiple_files=True, type=["pdf", "docx", "doc"])
+
+# if st.button("🚀 Process Resumes"):
+#     st.session_state.results = []
+#     progress_bar = st.progress(0)
+    
+#     for i, f in enumerate(uploaded_files):
+#         with tempfile.NamedTemporaryFile(delete=False, suffix=f.name) as tmp:
+#             tmp.write(f.getbuffer()); tmp_path = tmp.name
+        
+#         try:
+#             res = pipeline.invoke({"file_path": tmp_path})
+#             data = res["extracted_data"]
+#             if data and "error" not in data:
+#                 st.session_state.results.append(data)
+#                 st.success(f"✓ {f.name}")
+#             time.sleep(5) # Cooldown
+#         finally:
+#             if os.path.exists(tmp_path): os.remove(tmp_path)
+#         progress_bar.progress((i + 1) / len(uploaded_files))
+
+#     rows = []
+#     for r in st.session_state.results:
+#         # Recent Experience Row
+#         rows.append({
+#             "Name": r.get("name"), "Email": r.get("email"), 
+#             "City": r.get("location"), "Total Exp": r.get("total_experience"),
+#             "Company": r.get("recent_company"), "Designation": r.get("recent_designation")
+#         })
+#         # Previous Experience Row
+#         rows.append({
+#             "Name": "", "Email": "", "City": "", "Total Exp": "",
+#             "Company": r.get("previous_company"), "Designation": r.get("previous_designation")
+#         })
+    
+#     df = pd.DataFrame(rows)
+#     st.dataframe(df, width='stretch')
+    
+#     buffer = BytesIO()
+#     with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+#         df.to_excel(writer, index=False)
+#     st.download_button("⬇️ Download Excel", buffer.getvalue(), "resumes.xlsx")
+# code from Gemini matching Anils excel
 import streamlit as st
 import os, time, tempfile, pandas as pd
 from io import BytesIO
@@ -289,30 +342,31 @@ if st.button("🚀 Process Resumes"):
     for i, f in enumerate(uploaded_files):
         with tempfile.NamedTemporaryFile(delete=False, suffix=f.name) as tmp:
             tmp.write(f.getbuffer()); tmp_path = tmp.name
-        
         try:
             res = pipeline.invoke({"file_path": tmp_path})
             data = res["extracted_data"]
             if data and "error" not in data:
                 st.session_state.results.append(data)
                 st.success(f"✓ {f.name}")
-            time.sleep(5) # Cooldown
+            time.sleep(5)
         finally:
             if os.path.exists(tmp_path): os.remove(tmp_path)
         progress_bar.progress((i + 1) / len(uploaded_files))
 
+    # Map to your specific headers: ['Sr No', 'Position', 'Name', 'Company', 'Designation', 'Work Experience', 'Location']
     rows = []
-    for r in st.session_state.results:
-        # Recent Experience Row
+    for i, r in enumerate(st.session_state.results, 1):
+        # Recent Role Row
         rows.append({
-            "Name": r.get("name"), "Email": r.get("email"), 
-            "City": r.get("location"), "Total Exp": r.get("total_experience"),
-            "Company": r.get("recent_company"), "Designation": r.get("recent_designation")
+            "Sr No": i, "Position": "", "Name": r.get("name"), 
+            "Company": r.get("recent_company"), "Designation": r.get("recent_designation"),
+            "Work Experience": r.get("total_exp"), "Location": r.get("location")
         })
-        # Previous Experience Row
+        # Previous Role Row
         rows.append({
-            "Name": "", "Email": "", "City": "", "Total Exp": "",
-            "Company": r.get("previous_company"), "Designation": r.get("previous_designation")
+            "Sr No": "", "Position": "", "Name": "", 
+            "Company": r.get("prev_company"), "Designation": r.get("prev_designation"),
+            "Work Experience": "", "Location": ""
         })
     
     df = pd.DataFrame(rows)
