@@ -1,58 +1,178 @@
+# import streamlit as st
+# import pandas as pd
+# from pathlib import Path
+# import os
+# import shutil
+# from processing import pipeline
+
+# # Configure Page
+# st.set_page_config(page_title="Manalot | AI Resume Scout", layout="wide")
+# st.title("📄 Manalot AI Resume Scout")
+
+# # 1. FIX: Use a local folder instead of /app/data
+# # Use a relative path! This creates a folder inside your app's directory.
+# DATA_DIR = Path("data") 
+# DATA_DIR.mkdir(exist_ok=True)
+
+# # Initialize Session State
+# if 'results' not in st.session_state:
+#     st.session_state.results = []
+
+# uploaded_files = st.file_uploader("Upload Resumes", accept_multiple_files=True, type=['pdf', 'docx', 'doc'])
+
+# if st.button("🚀 Start Extraction"):
+#     if not uploaded_files:
+#         st.warning("Please upload files first.")
+#     else:
+#         progress_bar = st.progress(0)
+#         status_text = st.empty()
+        
+#         for i, file in enumerate(uploaded_files):
+#             status_text.text(f"Analyzing {file.name}...")
+            
+#             # Save file to local 'data/' folder
+#             temp_path = DATA_DIR / file.name
+#             with open(temp_path, "wb") as f:
+#                 f.write(file.getbuffer())
+            
+#             try:
+#                 # Run Pipeline
+#                 res = pipeline.invoke({"file_path": str(temp_path)})
+#                 st.session_state.results.append(res["extracted_data"])
+#             except Exception as e:
+#                 st.error(f"Failed to process {file.name}: {e}")
+#             finally:
+#                 # Cleanup temp file
+#                 if temp_path.exists():
+#                     os.remove(temp_path)
+            
+#             progress_bar.progress((i + 1) / len(uploaded_files))
+        
+#         status_text.text("Extraction Complete!")
+
+# # Display Results
+# if st.session_state.results:
+#     df = pd.DataFrame(st.session_state.results)
+#     st.dataframe(df, use_container_width=True)
+#     csv = df.to_csv(index=False).encode('utf-8')
+#     st.download_button("⬇️ Download CSV", csv, "results.csv", "text/csv")
+
+
 import streamlit as st
+import os
 import pandas as pd
 from pathlib import Path
-import os
-import shutil
+from io import BytesIO
+import tempfile
+import time
+
+if not os.getenv("GEMINI_API_KEY"):
+    os.environ["GEMINI_API_KEY"] = st.secrets["GEMINI_API_KEY"]
+
 from processing import pipeline
 
-# Configure Page
-st.set_page_config(page_title="Manalot | AI Resume Scout", layout="wide")
-st.title("📄 Manalot AI Resume Scout")
+BATCH_SIZE = 25
+BATCH_PAUSE = 65
 
-# 1. FIX: Use a local folder instead of /app/data
-# Use a relative path! This creates a folder inside your app's directory.
-DATA_DIR = Path("data") 
-DATA_DIR.mkdir(exist_ok=True)
+st.set_page_config(page_title="Manalot AI Portal", layout="wide")
+st.title("📄 Resume Extraction Portal")
 
-# Initialize Session State
-if 'results' not in st.session_state:
-    st.session_state.results = []
+uploaded_files = st.file_uploader(
+    "Upload Resumes (PDF or Word)",
+    accept_multiple_files=True,
+    type=["pdf", "docx", "doc"]
+)
 
-uploaded_files = st.file_uploader("Upload Resumes", accept_multiple_files=True, type=['pdf', 'docx', 'doc'])
+if uploaded_files:
+    batches_needed = (len(uploaded_files) // BATCH_SIZE) + 1
+    st.info(f"{len(uploaded_files)} file(s) uploaded — "
+            f"estimated time: ~{batches_needed * 2} minute(s).")
 
-if st.button("🚀 Start Extraction"):
+if st.button("🚀 Process Resumes"):
     if not uploaded_files:
         st.warning("Please upload files first.")
     else:
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
-        for i, file in enumerate(uploaded_files):
-            status_text.text(f"Analyzing {file.name}...")
-            
-            # Save file to local 'data/' folder
-            temp_path = DATA_DIR / file.name
-            with open(temp_path, "wb") as f:
-                f.write(file.getbuffer())
-            
-            try:
-                # Run Pipeline
-                res = pipeline.invoke({"file_path": str(temp_path)})
-                st.session_state.results.append(res["extracted_data"])
-            except Exception as e:
-                st.error(f"Failed to process {file.name}: {e}")
-            finally:
-                # Cleanup temp file
-                if temp_path.exists():
-                    os.remove(temp_path)
-            
-            progress_bar.progress((i + 1) / len(uploaded_files))
-        
-        status_text.text("Extraction Complete!")
+        results = []
+        errors = []
+        progress = st.progress(0)
+        status = st.empty()
+        batch_status = st.empty()
+        total = len(uploaded_files)
+        batches = [uploaded_files[i:i+BATCH_SIZE] for i in range(0, total, BATCH_SIZE)]
 
-# Display Results
-if st.session_state.results:
-    df = pd.DataFrame(st.session_state.results)
-    st.dataframe(df, use_container_width=True)
-    csv = df.to_csv(index=False).encode('utf-8')
-    st.download_button("⬇️ Download CSV", csv, "results.csv", "text/csv")
+        for batch_num, batch in enumerate(batches):
+            if batch_num > 0:
+                for remaining in range(BATCH_PAUSE, 0, -1):
+                    batch_status.info(f"Cooldown: {remaining}s before next batch...")
+                    time.sleep(1)
+                batch_status.empty()
+
+            batch_status.info(f"Batch {batch_num+1}/{len(batches)} — {len(batch)} resumes...")
+
+            for f in batch:
+                status.text(f"Processing: {f.name}")
+                suffix = Path(f.name).suffix
+
+                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                    tmp.write(f.getbuffer())
+                    tmp_path = Path(tmp.name)
+
+                try:
+                    res = pipeline.invoke({"file_path": str(tmp_path)})
+                    results.append(res["extracted_data"])
+                    st.success(f"✓ {f.name}")
+
+                except Exception as e:
+                    errors.append(f.name)
+                    st.error(f"✗ {f.name}: {str(e)}")
+
+                finally:
+                    if tmp_path.exists():
+                        tmp_path.unlink()
+
+                progress.progress((len(results) + len(errors)) / total)
+
+        status.text("All done!")
+        batch_status.empty()
+
+        if errors:
+            st.warning(f"{len(errors)} failed: {', '.join(errors)}")
+
+        if results:
+            rows = []
+            for i, data in enumerate(results, start=1):
+                rows.append({
+                    "Sr No": i,
+                    "Name": data.get("name", ""),
+                    "Company": data.get("Company_1", ""),
+                    "Designation": data.get("Designation_1", ""),
+                    "Work Experience": data.get("Work_experience", ""),
+                    "Location": data.get("Location", ""),
+                    "Contact": data.get("Contact_no", ""),
+                    "Email": data.get("email", "")
+                })
+                rows.append({
+                    "Sr No": None, "Name": None,
+                    "Company": data.get("Company_2", ""),
+                    "Designation": data.get("Designation_2", ""),
+                    "Work Experience": None,
+                    "Location": None, "Contact": None, "Email": None
+                })
+
+            df = pd.DataFrame(rows)
+
+            # Convert all columns to string to avoid pyarrow type errors
+            df = df.astype(object)
+
+            st.dataframe(df)
+
+            buffer = BytesIO()
+            df.to_excel(buffer, index=False)
+            buffer.seek(0)
+
+            st.download_button(
+                "⬇️ Download Master Excel",
+                buffer,
+                "extracted_resumes.xlsx",
+                "application/vnd.ms-excel"
+            )
