@@ -279,44 +279,41 @@ from processing import pipeline
 st.set_page_config(page_title="Resume Portal", layout="wide")
 st.title("📄 Resume Extraction Portal")
 
-if "results" not in st.session_state:
-    st.session_state.results = []
+if "results" not in st.session_state: st.session_state.results = []
 
 uploaded_files = st.file_uploader("Upload Resumes", accept_multiple_files=True, type=["pdf", "docx", "doc"])
 
 if st.button("🚀 Process Resumes"):
-    st.session_state.results = [] # Reset on new run
-    progress = st.progress(0)
-    
-    for i, f in enumerate(uploaded_files):
+    st.session_state.results = []
+    for f in uploaded_files:
         with tempfile.NamedTemporaryFile(delete=False, suffix=Path(f.name).suffix) as tmp:
-            tmp.write(f.getbuffer())
-            tmp_path = tmp.name
+            tmp.write(f.getbuffer()); tmp_path = tmp.name
         
         try:
             res = pipeline.invoke({"file_path": tmp_path})
             data = res["extracted_data"]
-            
-            if "error" in data:
-                st.error(f"✗ {f.name}: {data['error']}")
-            else:
-                st.session_state.results.append(data)
-                st.success(f"✓ {f.name}")
-            
-            time.sleep(6) # Sufficiently slow for free tier
-        except Exception as e:
-            st.error(f"Critical Error on {f.name}: {e}")
+            if data: st.session_state.results.append(data)
+            time.sleep(6) # Keep this high for Groq Free Tier
         finally:
             if os.path.exists(tmp_path): os.remove(tmp_path)
-            
-        progress.progress((i + 1) / len(uploaded_files))
 
-if st.session_state.results:
-    # Build Stacked Rows
+    # Dynamic Stacking Logic
     rows = []
     for r in st.session_state.results:
-        rows.append({"Name": r.get("name"), "Email": r.get("email"), "Company": r.get("company_1"), "Designation": r.get("designation_1"), "Exp": r.get("total_experience_years")})
-        rows.append({"Name": "", "Email": "", "Company": r.get("company_2"), "Designation": r.get("designation_2"), "Exp": ""})
+        jobs = r.get("jobs", [])
+        # Add primary info (Name, Email, etc) with first job
+        first_job = jobs[0] if jobs else {"company": "", "designation": ""}
+        rows.append({
+            "Name": r.get("name"), "Email": r.get("email"), "Location": r.get("location"),
+            "Total Exp": r.get("total_experience"),
+            "Company": first_job.get("company"), "Designation": first_job.get("designation")
+        })
+        # Add subsequent jobs stacked below
+        for job in jobs[1:]:
+            rows.append({
+                "Name": "", "Email": "", "Location": "", "Total Exp": "",
+                "Company": job.get("company"), "Designation": job.get("designation")
+            })
     
     df = pd.DataFrame(rows)
     st.dataframe(df, width='stretch')
