@@ -315,41 +315,106 @@
 
 # def pipeline_wrapper(file_path):
 #     return pipeline.invoke({"file_path": file_path})
-# code from Gemini matched to Anil's excel
-import os, json, re, mammoth, pdfplumber
+# # code from Gemini matched to Anil's excel
+# import os, json, re, mammoth, pdfplumber
+# from pathlib import Path
+# from langchain_groq import ChatGroq
+# from langgraph.graph import StateGraph, END
+# from typing import TypedDict
+
+# llm = ChatGroq(model="llama-3.1-8b-instant", api_key=os.getenv("GROQ_API_KEY"))
+
+# class ResumePathState(TypedDict):
+#     file_path: str
+#     extracted_data: dict
+
+# def load_and_extract(state: ResumePathState) -> dict:
+#     path = Path(state["file_path"])
+#     text = ""
+#     if path.suffix.lower() == ".pdf":
+#         with pdfplumber.open(str(path)) as pdf:
+#             text = "\n".join([p.extract_text() or "" for p in pdf.pages])
+#     elif path.suffix.lower() in [".docx", ".doc"]:
+#         with open(str(path), "rb") as f:
+#             text = mammoth.extract_raw_text(f).value
+            
+#     prompt = f"""
+#     Extract resume details into STRICT JSON. 
+#     Location: City only.
+#     Experience: Total years.
+#     2 most recent roles: 'recent_company', 'recent_designation', 'prev_company', 'prev_designation'.
+    
+#     JSON Schema:
+#     {{"name": "Name", "email": "Email", "location": "City", "total_exp": "Years", "recent_company": "Comp", "recent_designation": "Desig", "prev_company": "Comp", "prev_designation": "Desig"}}
+#     Text: {text[:10000]}
+#     """
+    
+#     response = llm.invoke(prompt).content
+#     json_str = re.sub(r'[\s\S]*?(\{[\s\S]*\})[\s\S]*', r'\1', response)
+#     try:
+#         return {"extracted_data": json.loads(json_str)}
+#     except:
+#         return {"extracted_data": {"error": "JSON Parse Error"}}
+
+# builder = StateGraph(ResumePathState)
+# builder.add_node("extract", load_and_extract)
+# builder.set_entry_point("extract")
+# builder.add_edge("extract", END)
+# pipeline = builder.compile()
+
+# def pipeline_wrapper(file_path):
+#     return pipeline.invoke({"file_path": file_path})
+
+# Processing .py with gemini increase token limit
+import os, json, re, mammoth, pdfplumber, time
 from pathlib import Path
 from langchain_groq import ChatGroq
 from langgraph.graph import StateGraph, END
 from typing import TypedDict
 
+# Initialize Groq
 llm = ChatGroq(model="llama-3.1-8b-instant", api_key=os.getenv("GROQ_API_KEY"))
 
 class ResumePathState(TypedDict):
     file_path: str
     extracted_data: dict
 
+def invoke_with_retry(prompt, retries=5):
+    """Exponential backoff: waits longer if Groq hits us with a Rate Limit."""
+    for i in range(retries):
+        try:
+            return llm.invoke(prompt)
+        except Exception as e:
+            if "429" in str(e):
+                sleep_time = 10 * (2 ** i) 
+                time.sleep(sleep_time)
+            else:
+                raise e
+    return llm.invoke(prompt)
+
 def load_and_extract(state: ResumePathState) -> dict:
     path = Path(state["file_path"])
     text = ""
-    if path.suffix.lower() == ".pdf":
-        with pdfplumber.open(str(path)) as pdf:
-            text = "\n".join([p.extract_text() or "" for p in pdf.pages])
-    elif path.suffix.lower() in [".docx", ".doc"]:
-        with open(str(path), "rb") as f:
-            text = mammoth.extract_raw_text(f).value
-            
+    try:
+        if path.suffix.lower() == ".pdf":
+            with pdfplumber.open(str(path)) as pdf:
+                text = "\n".join([p.extract_text() or "" for p in pdf.pages])
+        elif path.suffix.lower() in [".docx", ".doc"]:
+            with open(str(path), "rb") as f:
+                text = mammoth.extract_raw_text(f).value
+    except:
+        return {"extracted_data": {"error": "File read error"}}
+
     prompt = f"""
-    Extract resume details into STRICT JSON. 
+    Extract resume info to JSON. 
     Location: City only.
-    Experience: Total years.
     2 most recent roles: 'recent_company', 'recent_designation', 'prev_company', 'prev_designation'.
     
-    JSON Schema:
-    {{"name": "Name", "email": "Email", "location": "City", "total_exp": "Years", "recent_company": "Comp", "recent_designation": "Desig", "prev_company": "Comp", "prev_designation": "Desig"}}
-    Text: {text[:10000]}
+    JSON Schema: {{"name": "str", "email": "str", "location": "str", "total_exp": "str", "recent_company": "str", "recent_designation": "str", "prev_company": "str", "prev_designation": "str"}}
+    Text: {text[:8000]}
     """
     
-    response = llm.invoke(prompt).content
+    response = invoke_with_retry(prompt).content
     json_str = re.sub(r'[\s\S]*?(\{[\s\S]*\})[\s\S]*', r'\1', response)
     try:
         return {"extracted_data": json.loads(json_str)}
@@ -361,6 +426,3 @@ builder.add_node("extract", load_and_extract)
 builder.set_entry_point("extract")
 builder.add_edge("extract", END)
 pipeline = builder.compile()
-
-def pipeline_wrapper(file_path):
-    return pipeline.invoke({"file_path": file_path})
