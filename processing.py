@@ -269,50 +269,43 @@ class ResumePathState(TypedDict):
     file_path: str
     extracted_data: dict
 
-def invoke_with_retry(prompt, retries=3):
-    """Wait and retry if we hit rate limits."""
-    for i in range(retries):
-        try:
-            return llm.invoke(prompt)
-        except Exception as e:
-            if "429" in str(e):
-                time.sleep(15 * (i + 1))
-            else:
-                raise e
-    return llm.invoke(prompt)
-
 def load_and_extract(state: ResumePathState) -> dict:
     path = Path(state["file_path"])
     text = ""
-    
-    # Text extraction
-    try:
-        if path.suffix.lower() == ".pdf":
-            with pdfplumber.open(str(path)) as pdf:
-                text = "\n".join([p.extract_text() or "" for p in pdf.pages])
-        elif path.suffix.lower() in [".docx", ".doc"]:
-            with open(str(path), "rb") as f:
-                text = mammoth.extract_raw_text(f).value
-    except:
-        return {"extracted_data": {"error": "Could not read file"}}
-
+    if path.suffix.lower() == ".pdf":
+        with pdfplumber.open(str(path)) as pdf:
+            text = "\n".join([p.extract_text() or "" for p in pdf.pages])
+    elif path.suffix.lower() in [".docx", ".doc"]:
+        with open(str(path), "rb") as f:
+            text = mammoth.extract_raw_text(f).value
+            
     prompt = f"""
-    Extract resume info. Return ONLY a strict JSON object. 
-    Schema: {{"name": "str", "email": "str", "contact": "str", "location": "str", "total_experience": "str", "jobs": [{{"company": "str", "designation": "str"}}]}}
+    Extract resume details. Return ONLY pure JSON.
+    Location must be the City only. 
+    Capture the 2 most recent roles:
+    1. 'recent_company', 'recent_designation'
+    2. 'previous_company', 'previous_designation'
+    
+    JSON Schema:
+    {{
+        "name": "Full Name",
+        "email": "Email",
+        "location": "City only",
+        "total_experience": "Exact string",
+        "recent_company": "str",
+        "recent_designation": "str",
+        "previous_company": "str",
+        "previous_designation": "str"
+    }}
     Text: {text[:10000]}
     """
     
-    response = invoke_with_retry(prompt).content
-    
-    # Aggressive JSON Scraping
+    response = llm.invoke(prompt).content
     json_str = re.sub(r'[\s\S]*?(\{[\s\S]*\})[\s\S]*', r'\1', response)
-    
     try:
-        data = json.loads(json_str)
+        return {"extracted_data": json.loads(json_str)}
     except:
         return {"extracted_data": {"error": "JSON Parse Error"}}
-        
-    return {"extracted_data": data}
 
 builder = StateGraph(ResumePathState)
 builder.add_node("extract", load_and_extract)

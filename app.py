@@ -272,7 +272,6 @@
 # Code from Gemini
 import streamlit as st
 import os, time, tempfile, pandas as pd
-from pathlib import Path
 from io import BytesIO
 from processing import pipeline
 
@@ -286,12 +285,9 @@ uploaded_files = st.file_uploader("Upload Resumes", accept_multiple_files=True, 
 if st.button("🚀 Process Resumes"):
     st.session_state.results = []
     progress_bar = st.progress(0)
-    status_text = st.empty()
     
     for i, f in enumerate(uploaded_files):
-        status_text.text(f"Processing ({i+1}/{len(uploaded_files)}): {f.name}")
-        
-        with tempfile.NamedTemporaryFile(delete=False, suffix=Path(f.name).suffix) as tmp:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f.name) as tmp:
             tmp.write(f.getbuffer()); tmp_path = tmp.name
         
         try:
@@ -300,23 +296,24 @@ if st.button("🚀 Process Resumes"):
             if data and "error" not in data:
                 st.session_state.results.append(data)
                 st.success(f"✓ {f.name}")
-            else:
-                st.error(f"✗ Failed {f.name}: {data.get('error')}")
+            time.sleep(5) # Cooldown
         finally:
             if os.path.exists(tmp_path): os.remove(tmp_path)
-            
         progress_bar.progress((i + 1) / len(uploaded_files))
-        time.sleep(2) # Cooldown
 
-    # Build and Show Data
     rows = []
     for r in st.session_state.results:
-        jobs = r.get("jobs", [])
-        # Add Header Row
-        rows.append({"Name": r.get("name"), "Email": r.get("email"), "Location": r.get("location"), "Total Exp": r.get("total_experience"), "Company": jobs[0]["company"] if jobs else "", "Designation": jobs[0]["designation"] if jobs else ""})
-        # Add Sub-rows
-        for job in jobs[1:]:
-            rows.append({"Name": "", "Email": "", "Location": "", "Total Exp": "", "Company": job.get("company"), "Designation": job.get("designation")})
+        # Recent Experience Row
+        rows.append({
+            "Name": r.get("name"), "Email": r.get("email"), 
+            "City": r.get("location"), "Total Exp": r.get("total_experience"),
+            "Company": r.get("recent_company"), "Designation": r.get("recent_designation")
+        })
+        # Previous Experience Row
+        rows.append({
+            "Name": "", "Email": "", "City": "", "Total Exp": "",
+            "Company": r.get("previous_company"), "Designation": r.get("previous_designation")
+        })
     
     df = pd.DataFrame(rows)
     st.dataframe(df, width='stretch')
