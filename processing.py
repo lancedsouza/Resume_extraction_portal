@@ -280,26 +280,20 @@ def load_and_extract(state: ResumePathState) -> dict:
         with open(str(path), "rb") as f:
             text = mammoth.extract_raw_text(f).value
             
-    # STRICT PROMPT: Chronological order
-    prompt = f"""
-    Extract resume info from this text into a JSON object:
-    {{
-        "name": "Full Name",
-        "email": "Email",
-        "contact": "Phone",
-        "location": "City",
-        "total_experience_years": 0,
-        "company_1": "Most Recent Company",
-        "designation_1": "Most Recent Designation",
-        "company_2": "Second Most Recent Company",
-        "designation_2": "Second Most Recent Designation"
-    }}
-    Resume text: {text[:15000]}
-    """
-    
+    MAX_CHARS = 15000 
+    prompt = f"Extract resume info to JSON (ensure strict double quotes). Return ONLY JSON: {text[:MAX_CHARS]}"
     response = llm.invoke(prompt).content
-    match = re.search(r'\{.*\}', response, re.DOTALL)
-    data = json.loads(match.group()) if match else {}
+    
+    # JSON REPAIRMAN
+    try:
+        match = re.search(r'\{.*\}', response, re.DOTALL)
+        data = json.loads(match.group())
+    except:
+        fix_prompt = f"Fix this broken JSON and return only valid JSON: {response}"
+        fixed_response = llm.invoke(fix_prompt).content
+        match = re.search(r'\{.*\}', fixed_response, re.DOTALL)
+        data = json.loads(match.group()) if match else {}
+        
     return {"extracted_data": data}
 
 builder = StateGraph(ResumePathState)
