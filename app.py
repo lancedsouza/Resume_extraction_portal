@@ -176,95 +176,170 @@
 #                 "extracted_resumes.xlsx",
 #                 "application/vnd.ms-excel"
 #             )
-# Code from qwen
+# # Code from qwen
+# import streamlit as st
+# import pandas as pd
+# from pathlib import Path
+# import os
+# import shutil
+# import time 
+# from processing import pipeline
+
+# # Configure Page
+# st.set_page_config(page_title="Manalot | AI Resume Scout", layout="wide")
+# st.title("📄 Manalot AI Resume Scout")
+
+# # 1. FIX: Use a local folder instead of /app/data
+# # Use a relative path! This creates a folder inside your app's directory.
+# DATA_DIR = Path("data") 
+# DATA_DIR.mkdir(exist_ok=True)
+
+# # Initialize Session State
+# if 'results' not in st.session_state:
+#     st.session_state.results = []
+
+# uploaded_files = st.file_uploader("Upload Resumes", accept_multiple_files=True, type=['pdf', 'docx', 'doc'])
+
+# if st.button("🚀 Start Extraction"):
+#     if not uploaded_files:
+#         st.warning("Please upload files first.")
+#     else:
+#         progress_bar = st.progress(0)
+#         status_text = st.empty()
+        
+#         for i, file in enumerate(uploaded_files):
+#             status_text.text(f"Analyzing {file.name}...")
+            
+#             # Save file to local 'data/' folder
+#             temp_path = DATA_DIR / file.name
+#             with open(temp_path, "wb") as f:
+#                 f.write(file.getbuffer())
+            
+#             # --- RETRY LOGIC WITH EXPONENTIAL BACKOFF ---
+#             max_retries = 4
+#             processed = False
+            
+#             for attempt in range(max_retries):
+#                 try:
+#                     # Run Pipeline
+#                     res = pipeline.invoke({"file_path": str(temp_path)})
+#                     st.session_state.results.append(res["extracted_data"])
+#                     processed = True
+#                     break # Success, exit the retry loop
+#                 except Exception as e:
+#                     error_msg = str(e)
+#                     # Check if the error is specifically a rate limit (429)
+#                     if "rate_limit_exceeded" in error_msg or "429" in error_msg:
+#                         # Wait 5s, then 10s, then 20s, then 40s
+#                         wait_time = 5 * (2 ** attempt) 
+#                         st.warning(f"⏳ Rate limit hit for {file.name}. Waiting {wait_time}s and retrying ({attempt+1}/{max_retries})...")
+#                         time.sleep(wait_time)
+#                     else:
+#                         st.error(f"Failed to process {file.name}: {e}")
+#                         break # If it's a different error, stop retrying
+            
+#             if not processed:
+#                 st.error(f"Skipped {file.name} after {max_retries} retries.")
+#             # ------------------------------------------
+            
+#             # Cleanup temp file
+#             if temp_path.exists():
+#                 os.remove(temp_path)
+            
+#             # ADD A SMALL DELAY BETWEEN FILES
+#             # This spaces out your requests so you don't hit the 6000 TPM limit as quickly
+#             time.sleep(1.5) 
+            
+#             progress_bar.progress((i + 1) / len(uploaded_files))
+        
+#         status_text.text("Extraction Complete!")
+
+# # --- DISPLAY RESULTS (FIXED FOR PYARROW CRASH) ---
+# if st.session_state.results:
+#     df = pd.DataFrame(st.session_state.results)
+    
+#     # FIX: Convert all columns to strings to prevent PyArrow crashes 
+#     # when the LLM returns nested JSON (lists/dicts) in the dataframe
+#     df_display = df.astype(str)
+    
+#     st.dataframe(df_display, use_container_width=True)
+    
+#     # For the CSV download, we use the original df so Excel/CSV parsers 
+#     # can still attempt to read the raw data if needed
+#     csv = df.to_csv(index=False).encode('utf-8')
+#     st.download_button("⬇️ Download CSV", csv, "results.csv", "text/csv")
+
+# Code from Gemini
 import streamlit as st
+import os, time, tempfile
 import pandas as pd
 from pathlib import Path
-import os
-import shutil
-import time 
+from io import BytesIO
 from processing import pipeline
 
-# Configure Page
-st.set_page_config(page_title="Manalot | AI Resume Scout", layout="wide")
-st.title("📄 Manalot AI Resume Scout")
+# Load API Key
+if not os.getenv("GROQ_API_KEY"):
+    os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
 
-# 1. FIX: Use a local folder instead of /app/data
-# Use a relative path! This creates a folder inside your app's directory.
-DATA_DIR = Path("data") 
-DATA_DIR.mkdir(exist_ok=True)
+st.set_page_config(page_title="Manalot AI Portal", layout="wide")
+st.title("📄 Resume Extraction Portal")
 
-# Initialize Session State
-if 'results' not in st.session_state:
-    st.session_state.results = []
+uploaded_files = st.file_uploader("Upload Resumes", accept_multiple_files=True, type=["pdf", "docx", "doc"])
 
-uploaded_files = st.file_uploader("Upload Resumes", accept_multiple_files=True, type=['pdf', 'docx', 'doc'])
-
-if st.button("🚀 Start Extraction"):
+if st.button("🚀 Process Resumes"):
     if not uploaded_files:
         st.warning("Please upload files first.")
     else:
-        progress_bar = st.progress(0)
-        status_text = st.empty()
+        results = []
+        progress = st.progress(0)
+        status = st.empty()
         
-        for i, file in enumerate(uploaded_files):
-            status_text.text(f"Analyzing {file.name}...")
+        for i, f in enumerate(uploaded_files):
+            status.text(f"Processing: {f.name}")
             
-            # Save file to local 'data/' folder
-            temp_path = DATA_DIR / file.name
-            with open(temp_path, "wb") as f:
-                f.write(file.getbuffer())
+            # Use system temp directory (safe for Streamlit Cloud)
+            with tempfile.NamedTemporaryFile(delete=False, suffix=Path(f.name).suffix) as tmp:
+                tmp.write(f.getbuffer())
+                tmp_path = Path(tmp.name)
             
-            # --- RETRY LOGIC WITH EXPONENTIAL BACKOFF ---
-            max_retries = 4
-            processed = False
+            try:
+                res = pipeline.invoke({"file_path": str(tmp_path)})
+                results.append(res["extracted_data"])
+                st.success(f"✓ {f.name}")
+                time.sleep(2) # Cooldown for Groq rate limits
+            except Exception as e:
+                st.error(f"✗ {f.name}: {str(e)}")
+            finally:
+                if tmp_path.exists():
+                    os.remove(tmp_path)
             
-            for attempt in range(max_retries):
-                try:
-                    # Run Pipeline
-                    res = pipeline.invoke({"file_path": str(temp_path)})
-                    st.session_state.results.append(res["extracted_data"])
-                    processed = True
-                    break # Success, exit the retry loop
-                except Exception as e:
-                    error_msg = str(e)
-                    # Check if the error is specifically a rate limit (429)
-                    if "rate_limit_exceeded" in error_msg or "429" in error_msg:
-                        # Wait 5s, then 10s, then 20s, then 40s
-                        wait_time = 5 * (2 ** attempt) 
-                        st.warning(f"⏳ Rate limit hit for {file.name}. Waiting {wait_time}s and retrying ({attempt+1}/{max_retries})...")
-                        time.sleep(wait_time)
-                    else:
-                        st.error(f"Failed to process {file.name}: {e}")
-                        break # If it's a different error, stop retrying
-            
-            if not processed:
-                st.error(f"Skipped {file.name} after {max_retries} retries.")
-            # ------------------------------------------
-            
-            # Cleanup temp file
-            if temp_path.exists():
-                os.remove(temp_path)
-            
-            # ADD A SMALL DELAY BETWEEN FILES
-            # This spaces out your requests so you don't hit the 6000 TPM limit as quickly
-            time.sleep(1.5) 
-            
-            progress_bar.progress((i + 1) / len(uploaded_files))
-        
-        status_text.text("Extraction Complete!")
+            progress.progress((i + 1) / len(uploaded_files))
 
-# --- DISPLAY RESULTS (FIXED FOR PYARROW CRASH) ---
-if st.session_state.results:
-    df = pd.DataFrame(st.session_state.results)
-    
-    # FIX: Convert all columns to strings to prevent PyArrow crashes 
-    # when the LLM returns nested JSON (lists/dicts) in the dataframe
-    df_display = df.astype(str)
-    
-    st.dataframe(df_display, use_container_width=True)
-    
-    # For the CSV download, we use the original df so Excel/CSV parsers 
-    # can still attempt to read the raw data if needed
-    csv = df.to_csv(index=False).encode('utf-8')
-    st.download_button("⬇️ Download CSV", csv, "results.csv", "text/csv")
+        if results:
+            # Flatten data for DataFrame
+            rows = []
+            for data in results:
+                rows.append({
+                    "Name": data.get("name", ""),
+                    "Company": data.get("Company_1", ""),
+                    "Designation": data.get("Designation_1", ""),
+                    "Work Exp": data.get("Work_experience", ""),
+                    "Location": data.get("Location", ""),
+                    "Contact": data.get("Contact_no", ""),
+                    "Email": data.get("email", "")
+                })
+            
+            df = pd.DataFrame(rows).astype(str)
+            st.dataframe(df, use_container_width=True)
+
+            # Excel Download
+            buffer = BytesIO()
+            with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+                df.to_excel(writer, index=False)
+            
+            st.download_button(
+                "⬇️ Download Excel",
+                buffer.getvalue(),
+                "extracted_resumes.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
