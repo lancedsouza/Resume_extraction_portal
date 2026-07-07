@@ -182,7 +182,7 @@ import pandas as pd
 from pathlib import Path
 import os
 import shutil
-import time # <--- ADDED: Required for delays and retries
+import time 
 from processing import pipeline
 
 # Configure Page
@@ -215,8 +215,8 @@ if st.button("🚀 Start Extraction"):
             with open(temp_path, "wb") as f:
                 f.write(file.getbuffer())
             
-            # --- RETRY LOGIC FOR RATE LIMITS ---
-            max_retries = 3
+            # --- RETRY LOGIC WITH EXPONENTIAL BACKOFF ---
+            max_retries = 4
             processed = False
             
             for attempt in range(max_retries):
@@ -230,7 +230,8 @@ if st.button("🚀 Start Extraction"):
                     error_msg = str(e)
                     # Check if the error is specifically a rate limit (429)
                     if "rate_limit_exceeded" in error_msg or "429" in error_msg:
-                        wait_time = 3 # Wait 3 seconds to let the token limit reset
+                        # Wait 5s, then 10s, then 20s, then 40s
+                        wait_time = 5 * (2 ** attempt) 
                         st.warning(f"⏳ Rate limit hit for {file.name}. Waiting {wait_time}s and retrying ({attempt+1}/{max_retries})...")
                         time.sleep(wait_time)
                     else:
@@ -253,9 +254,17 @@ if st.button("🚀 Start Extraction"):
         
         status_text.text("Extraction Complete!")
 
-# Display Results
+# --- DISPLAY RESULTS (FIXED FOR PYARROW CRASH) ---
 if st.session_state.results:
     df = pd.DataFrame(st.session_state.results)
-    st.dataframe(df, use_container_width=True)
+    
+    # FIX: Convert all columns to strings to prevent PyArrow crashes 
+    # when the LLM returns nested JSON (lists/dicts) in the dataframe
+    df_display = df.astype(str)
+    
+    st.dataframe(df_display, use_container_width=True)
+    
+    # For the CSV download, we use the original df so Excel/CSV parsers 
+    # can still attempt to read the raw data if needed
     csv = df.to_csv(index=False).encode('utf-8')
     st.download_button("⬇️ Download CSV", csv, "results.csv", "text/csv")
