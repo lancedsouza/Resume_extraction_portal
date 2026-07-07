@@ -277,69 +277,44 @@ from pathlib import Path
 from io import BytesIO
 from processing import pipeline
 
-# Load API Key
-if not os.getenv("GROQ_API_KEY"):
-    os.environ["GROQ_API_KEY"] = st.secrets["GROQ_API_KEY"]
-
-st.set_page_config(page_title="Manalot AI Portal", layout="wide")
+st.set_page_config(page_title="Resume Portal", layout="wide")
 st.title("📄 Resume Extraction Portal")
 
 uploaded_files = st.file_uploader("Upload Resumes", accept_multiple_files=True, type=["pdf", "docx", "doc"])
 
 if st.button("🚀 Process Resumes"):
-    if not uploaded_files:
-        st.warning("Please upload files first.")
-    else:
-        results = []
-        progress = st.progress(0)
-        status = st.empty()
+    results = []
+    for f in uploaded_files:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=Path(f.name).suffix) as tmp:
+            tmp.write(f.getbuffer())
+            tmp_path = tmp.name
         
-        for i, f in enumerate(uploaded_files):
-            status.text(f"Processing: {f.name}")
-            
-            # Use system temp directory (safe for Streamlit Cloud)
-            with tempfile.NamedTemporaryFile(delete=False, suffix=Path(f.name).suffix) as tmp:
-                tmp.write(f.getbuffer())
-                tmp_path = Path(tmp.name)
-            
-            try:
-                res = pipeline.invoke({"file_path": str(tmp_path)})
-                results.append(res["extracted_data"])
-                st.success(f"✓ {f.name}")
-                time.sleep(2) # Cooldown for Groq rate limits
-            except Exception as e:
-                st.error(f"✗ {f.name}: {str(e)}")
-            finally:
-                if tmp_path.exists():
-                    os.remove(tmp_path)
-            
-            progress.progress((i + 1) / len(uploaded_files))
+        try:
+            res = pipeline.invoke({"file_path": tmp_path})
+            results.append(res["extracted_data"])
+            st.success(f"✓ {f.name}")
+            time.sleep(1)
+        except Exception as e:
+            st.error(f"✗ {f.name}: {e}")
+        finally:
+            if os.path.exists(tmp_path): os.remove(tmp_path)
 
-        if results:
-            # Flatten data for DataFrame
-            rows = []
-            for data in results:
-                rows.append({
-                    "Name": data.get("name", ""),
-                    "Company": data.get("Company_1", ""),
-                    "Designation": data.get("Designation_1", ""),
-                    "Work Exp": data.get("Work_experience", ""),
-                    "Location": data.get("Location", ""),
-                    "Contact": data.get("Contact_no", ""),
-                    "Email": data.get("email", "")
-                })
-            
-            df = pd.DataFrame(rows).astype(str)
-            st.dataframe(df, use_container_width=True)
-
-            # Excel Download
-            buffer = BytesIO()
-            with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-                df.to_excel(writer, index=False)
-            
-            st.download_button(
-                "⬇️ Download Excel",
-                buffer.getvalue(),
-                "extracted_resumes.xlsx",
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+    if results:
+        # Map to your required format
+        df = pd.DataFrame([{
+            "Name": r.get("name"),
+            "Email": r.get("email"),
+            "Contact": r.get("contact"),
+            "Location": r.get("location"),
+            "Total Exp (Years)": r.get("total_experience_years"),
+            "Most Recent Company": r.get("company_1"),
+            "Most Recent Designation": r.get("designation_1"),
+            "Previous Company": r.get("company_2"),
+            "Previous Designation": r.get("designation_2")
+        } for r in results])
+        
+        st.dataframe(df, use_container_width=True)
+        
+        buffer = BytesIO()
+        df.to_excel(buffer, index=False)
+        st.download_button("⬇️ Download Excel", buffer.getvalue(), "resumes.xlsx")

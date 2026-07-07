@@ -263,7 +263,6 @@ from langchain_groq import ChatGroq
 from langgraph.graph import StateGraph, END
 from typing import TypedDict
 
-# Initialize Groq LLM
 llm = ChatGroq(model="llama-3.1-8b-instant", api_key=os.getenv("GROQ_API_KEY"))
 
 class ResumePathState(TypedDict):
@@ -274,34 +273,35 @@ def load_and_extract(state: ResumePathState) -> dict:
     path = Path(state["file_path"])
     text = ""
     
-    # PDF Extraction
     if path.suffix.lower() == ".pdf":
         with pdfplumber.open(str(path)) as pdf:
-            extracted_pages = []
-            for page in pdf.pages:
-                if hasattr(page, 'extract_text'):
-                    page_text = page.extract_text()
-                    extracted_pages.append(page_text if page_text else "")
-            text = "\n".join(extracted_pages)
-            
-    # DOCX/DOC Extraction
+            text = "\n".join([page.extract_text() or "" for page in pdf.pages])
     elif path.suffix.lower() in [".docx", ".doc"]:
         with open(str(path), "rb") as f:
-            result = mammoth.extract_raw_text(f)
-            text = result.value
+            text = mammoth.extract_raw_text(f).value
             
-    # AI Extraction with Truncation to respect Rate Limits
-    MAX_CHARS = 15000 
-    truncated_text = text[:MAX_CHARS]
+    # STRICT PROMPT: Chronological order
+    prompt = f"""
+    Extract resume info from this text into a JSON object:
+    {{
+        "name": "Full Name",
+        "email": "Email",
+        "contact": "Phone",
+        "location": "City",
+        "total_experience_years": 0,
+        "company_1": "Most Recent Company",
+        "designation_1": "Most Recent Designation",
+        "company_2": "Second Most Recent Company",
+        "designation_2": "Second Most Recent Designation"
+    }}
+    Resume text: {text[:15000]}
+    """
     
-    prompt = f"Extract resume info to JSON: {truncated_text}"
     response = llm.invoke(prompt).content
     match = re.search(r'\{.*\}', response, re.DOTALL)
     data = json.loads(match.group()) if match else {}
-    
     return {"extracted_data": data}
 
-# Define the graph
 builder = StateGraph(ResumePathState)
 builder.add_node("extract", load_and_extract)
 builder.set_entry_point("extract")
