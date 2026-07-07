@@ -173,7 +173,91 @@
 #     return pipeline.invoke({"file_path": file_path})
 
 # Code from Qwen
-import json, re, os, mammoth, pdfplumber, pandas as pd
+# import json, re, os, mammoth, pdfplumber, pandas as pd
+# from pathlib import Path
+# from langchain_groq import ChatGroq
+# from langgraph.graph import StateGraph, END
+# from typing import TypedDict
+
+# # Initialize Groq LLM
+# llm = ChatGroq(model="llama-3.1-8b-instant", api_key=os.getenv("GROQ_API_KEY"))
+
+# class ResumePathState(TypedDict):
+#     file_path: str
+#     extracted_data: dict
+
+# def load_and_extract(state: ResumePathState) -> dict:
+#     path = Path(state["file_path"])
+#     text = ""
+    
+#     # PDF Extraction
+#     if path.suffix.lower() == ".pdf":
+#         with pdfplumber.open(str(path)) as pdf:
+#             text = "\n".join([page.extract_text() or "" for page in pdf.pages])
+            
+#     # DOCX/DOC Extraction
+#     elif path.suffix.lower() in [".docx", ".doc"]:
+#         with open(str(path), "rb") as f:
+#             result = mammoth.extract_raw_text(f)
+#             text = result.value
+            
+#     # AI Extraction
+#     MAX_CHARS = 5000 
+#     truncated_text = text[:MAX_CHARS]
+    
+#     # Prompt engineered to return flat JSON to prevent PyArrow crashes later
+#     prompt = f"""
+#     Extract resume information and return ONLY a valid, flat JSON object. 
+#     Do not use nested arrays or objects. If a candidate has multiple jobs or degrees, 
+#     combine them into a single string separated by semicolons (;).
+    
+#     Resume text: 
+#     {truncated_text}
+#     """
+    
+#     response = llm.invoke(prompt).content
+#     match = re.search(r'\{.*\}', response, re.DOTALL)
+    
+#     # Safety check in case LLM returns invalid JSON
+#     try:
+#         data = json.loads(match.group()) if match else {}
+#     except json.JSONDecodeError:
+#         data = {"error": "Failed to parse LLM JSON response"}
+    
+#     return {"extracted_data": data}
+
+# def save_to_excel(state: ResumePathState) -> dict:
+#     # Use relative path 'data/'
+#     data_dir = Path("data")
+#     data_dir.mkdir(exist_ok=True)
+#     excel_path = data_dir / "master_resume_data.xlsx"
+    
+#     new_data = pd.DataFrame([state["extracted_data"]])
+    
+#     if excel_path.exists():
+#         df = pd.read_excel(excel_path)
+#         df = pd.concat([df, new_data], ignore_index=True)
+#     else:
+#         df = new_data
+        
+#     df.to_excel(excel_path, index=False)
+#     return {"extracted_data": state["extracted_data"]}
+
+# # Define the graph
+# builder = StateGraph(ResumePathState)
+# builder.add_node("extract", load_and_extract)
+# builder.add_node("save", save_to_excel)
+# builder.set_entry_point("extract")
+# builder.add_edge("extract", "save")
+# builder.add_edge("save", END)
+
+# # Compile the pipeline
+# pipeline = builder.compile()
+
+# # NOTE: DO NOT put "from processing import pipeline" at the bottom of this file!
+
+# code from Gemini
+import json, re, os, mammoth, pdfplumber
 from pathlib import Path
 from langchain_groq import ChatGroq
 from langgraph.graph import StateGraph, END
@@ -193,7 +277,12 @@ def load_and_extract(state: ResumePathState) -> dict:
     # PDF Extraction
     if path.suffix.lower() == ".pdf":
         with pdfplumber.open(str(path)) as pdf:
-            text = "\n".join([page.extract_text() or "" for page in pdf.pages])
+            extracted_pages = []
+            for page in pdf.pages:
+                if hasattr(page, 'extract_text'):
+                    page_text = page.extract_text()
+                    extracted_pages.append(page_text if page_text else "")
+            text = "\n".join(extracted_pages)
             
     # DOCX/DOC Extraction
     elif path.suffix.lower() in [".docx", ".doc"]:
@@ -201,57 +290,23 @@ def load_and_extract(state: ResumePathState) -> dict:
             result = mammoth.extract_raw_text(f)
             text = result.value
             
-    # AI Extraction
-    MAX_CHARS = 5000 
+    # AI Extraction with Truncation to respect Rate Limits
+    MAX_CHARS = 15000 
     truncated_text = text[:MAX_CHARS]
     
-    # Prompt engineered to return flat JSON to prevent PyArrow crashes later
-    prompt = f"""
-    Extract resume information and return ONLY a valid, flat JSON object. 
-    Do not use nested arrays or objects. If a candidate has multiple jobs or degrees, 
-    combine them into a single string separated by semicolons (;).
-    
-    Resume text: 
-    {truncated_text}
-    """
-    
+    prompt = f"Extract resume info to JSON: {truncated_text}"
     response = llm.invoke(prompt).content
     match = re.search(r'\{.*\}', response, re.DOTALL)
-    
-    # Safety check in case LLM returns invalid JSON
-    try:
-        data = json.loads(match.group()) if match else {}
-    except json.JSONDecodeError:
-        data = {"error": "Failed to parse LLM JSON response"}
+    data = json.loads(match.group()) if match else {}
     
     return {"extracted_data": data}
-
-def save_to_excel(state: ResumePathState) -> dict:
-    # Use relative path 'data/'
-    data_dir = Path("data")
-    data_dir.mkdir(exist_ok=True)
-    excel_path = data_dir / "master_resume_data.xlsx"
-    
-    new_data = pd.DataFrame([state["extracted_data"]])
-    
-    if excel_path.exists():
-        df = pd.read_excel(excel_path)
-        df = pd.concat([df, new_data], ignore_index=True)
-    else:
-        df = new_data
-        
-    df.to_excel(excel_path, index=False)
-    return {"extracted_data": state["extracted_data"]}
 
 # Define the graph
 builder = StateGraph(ResumePathState)
 builder.add_node("extract", load_and_extract)
-builder.add_node("save", save_to_excel)
 builder.set_entry_point("extract")
-builder.add_edge("extract", "save")
-builder.add_edge("save", END)
-
-# Compile the pipeline
+builder.add_edge("extract", END)
 pipeline = builder.compile()
 
-# NOTE: DO NOT put "from processing import pipeline" at the bottom of this file!
+def pipeline_wrapper(file_path):
+    return pipeline.invoke({"file_path": file_path})
