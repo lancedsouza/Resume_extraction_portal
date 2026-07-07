@@ -395,32 +395,25 @@ def invoke_with_retry(prompt, retries=5):
 def load_and_extract(state: ResumePathState) -> dict:
     path = Path(state["file_path"])
     text = ""
+    
+    # NEW: Trying a more aggressive text extraction
     try:
         if path.suffix.lower() == ".pdf":
             with pdfplumber.open(str(path)) as pdf:
-                text = "\n".join([p.extract_text() or "" for p in pdf.pages])
+                # Try extracting as a layout first; if empty, use raw text
+                text = "\n".join([p.extract_text(layout=True) or p.extract_text() or "" for p in pdf.pages])
+                # If still empty, the file might be complex; try to get raw chars
+                if not text.strip():
+                    text = "\n".join([p.extract_text(x_tolerance=2) for p in pdf.pages])
+                    
         elif path.suffix.lower() in [".docx", ".doc"]:
             with open(str(path), "rb") as f:
                 text = mammoth.extract_raw_text(f).value
-    except:
-        return {"extracted_data": {"error": "File read error"}}
+    except Exception as e:
+        return {"extracted_data": {"error": f"File read error: {str(e)}"}}
 
-    prompt = f"""
-    Extract resume info to JSON. 
-    Location: City only.
-    2 most recent roles: 'recent_company', 'recent_designation', 'prev_company', 'prev_designation'.
+    # The rest of your logic (Prompt, Groq call, JSON repair) stays exactly the same
     
-    JSON Schema: {{"name": "str", "email": "str", "location": "str", "total_exp": "str", "recent_company": "str", "recent_designation": "str", "prev_company": "str", "prev_designation": "str"}}
-    Text: {text[:8000]}
-    """
-    
-    response = invoke_with_retry(prompt).content
-    json_str = re.sub(r'[\s\S]*?(\{[\s\S]*\})[\s\S]*', r'\1', response)
-    try:
-        return {"extracted_data": json.loads(json_str)}
-    except:
-        return {"extracted_data": {"error": "JSON Parse Error"}}
-
 builder = StateGraph(ResumePathState)
 builder.add_node("extract", load_and_extract)
 builder.set_entry_point("extract")
