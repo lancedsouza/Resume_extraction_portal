@@ -285,35 +285,38 @@ uploaded_files = st.file_uploader("Upload Resumes", accept_multiple_files=True, 
 
 if st.button("🚀 Process Resumes"):
     st.session_state.results = []
-    for f in uploaded_files:
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    for i, f in enumerate(uploaded_files):
+        status_text.text(f"Processing ({i+1}/{len(uploaded_files)}): {f.name}")
+        
         with tempfile.NamedTemporaryFile(delete=False, suffix=Path(f.name).suffix) as tmp:
             tmp.write(f.getbuffer()); tmp_path = tmp.name
         
         try:
             res = pipeline.invoke({"file_path": tmp_path})
             data = res["extracted_data"]
-            if data: st.session_state.results.append(data)
-            time.sleep(6) # Keep this high for Groq Free Tier
+            if data and "error" not in data:
+                st.session_state.results.append(data)
+                st.success(f"✓ {f.name}")
+            else:
+                st.error(f"✗ Failed {f.name}: {data.get('error')}")
         finally:
             if os.path.exists(tmp_path): os.remove(tmp_path)
+            
+        progress_bar.progress((i + 1) / len(uploaded_files))
+        time.sleep(2) # Cooldown
 
-    # Dynamic Stacking Logic
+    # Build and Show Data
     rows = []
     for r in st.session_state.results:
         jobs = r.get("jobs", [])
-        # Add primary info (Name, Email, etc) with first job
-        first_job = jobs[0] if jobs else {"company": "", "designation": ""}
-        rows.append({
-            "Name": r.get("name"), "Email": r.get("email"), "Location": r.get("location"),
-            "Total Exp": r.get("total_experience"),
-            "Company": first_job.get("company"), "Designation": first_job.get("designation")
-        })
-        # Add subsequent jobs stacked below
+        # Add Header Row
+        rows.append({"Name": r.get("name"), "Email": r.get("email"), "Location": r.get("location"), "Total Exp": r.get("total_experience"), "Company": jobs[0]["company"] if jobs else "", "Designation": jobs[0]["designation"] if jobs else ""})
+        # Add Sub-rows
         for job in jobs[1:]:
-            rows.append({
-                "Name": "", "Email": "", "Location": "", "Total Exp": "",
-                "Company": job.get("company"), "Designation": job.get("designation")
-            })
+            rows.append({"Name": "", "Email": "", "Location": "", "Total Exp": "", "Company": job.get("company"), "Designation": job.get("designation")})
     
     df = pd.DataFrame(rows)
     st.dataframe(df, width='stretch')

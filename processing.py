@@ -257,11 +257,7 @@
 # # NOTE: DO NOT put "from processing import pipeline" at the bottom of this file!
 
 # code from Gemini
-import os
-import json
-import re
-import mammoth
-import pdfplumber
+import os, json, re, mammoth, pdfplumber, time
 from pathlib import Path
 from langchain_groq import ChatGroq
 from langgraph.graph import StateGraph, END
@@ -273,45 +269,49 @@ class ResumePathState(TypedDict):
     file_path: str
     extracted_data: dict
 
+def invoke_with_retry(prompt, retries=3):
+    """Wait and retry if we hit rate limits."""
+    for i in range(retries):
+        try:
+            return llm.invoke(prompt)
+        except Exception as e:
+            if "429" in str(e):
+                time.sleep(15 * (i + 1))
+            else:
+                raise e
+    return llm.invoke(prompt)
+
 def load_and_extract(state: ResumePathState) -> dict:
     path = Path(state["file_path"])
     text = ""
     
-    if path.suffix.lower() == ".pdf":
-        with pdfplumber.open(str(path)) as pdf:
-            text = "\n".join([p.extract_text() or "" for p in pdf.pages])
-    elif path.suffix.lower() in [".docx", ".doc"]:
-        with open(str(path), "rb") as f:
-            text = mammoth.extract_raw_text(f).value
-            
-    # Updated Prompt: Robust list capture
+    # Text extraction
+    try:
+        if path.suffix.lower() == ".pdf":
+            with pdfplumber.open(str(path)) as pdf:
+                text = "\n".join([p.extract_text() or "" for p in pdf.pages])
+        elif path.suffix.lower() in [".docx", ".doc"]:
+            with open(str(path), "rb") as f:
+                text = mammoth.extract_raw_text(f).value
+    except:
+        return {"extracted_data": {"error": "Could not read file"}}
+
     prompt = f"""
-    Extract resume details into JSON. 
-    Capture ALL experience, not just two roles. Order jobs from most recent to oldest.
-    If a field is missing, leave it as an empty string.
-    
-    JSON Schema:
-    {{
-        "name": "Full Name",
-        "email": "Email address",
-        "contact": "Phone number",
-        "location": "City or Location",
-        "total_experience": "Exact string (e.g. 11 Years 2 Months)",
-        "jobs": [
-            {{"company": "Name", "designation": "Role"}}
-        ]
-    }}
-    
-    Text: {text[:15000]}
+    Extract resume info. Return ONLY a strict JSON object. 
+    Schema: {{"name": "str", "email": "str", "contact": "str", "location": "str", "total_experience": "str", "jobs": [{{"company": "str", "designation": "str"}}]}}
+    Text: {text[:10000]}
     """
     
-    response = llm.invoke(prompt).content
-    # JSON Repairman
+    response = invoke_with_retry(prompt).content
+    
+    # Aggressive JSON Scraping
     json_str = re.sub(r'[\s\S]*?(\{[\s\S]*\})[\s\S]*', r'\1', response)
+    
     try:
         data = json.loads(json_str)
     except:
-        data = {}
+        return {"extracted_data": {"error": "JSON Parse Error"}}
+        
     return {"extracted_data": data}
 
 builder = StateGraph(ResumePathState)
