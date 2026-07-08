@@ -430,6 +430,67 @@
 #     st.rerun()
 
 # Asyn code
+# import streamlit as st
+# import os, time, tempfile, pandas as pd, asyncio
+# from io import BytesIO
+# from processing import pipeline
+
+# st.set_page_config(page_title="Master Resume Portal", layout="wide")
+
+# if "master_results" not in st.session_state:
+#     st.session_state.master_results = []
+
+# st.title("📄 Master Resume Extraction Portal")
+
+# async def run_pipeline_async(file_path):
+#     return await pipeline.ainvoke({"file_path": file_path})
+
+# uploaded_files = st.file_uploader("Upload Batch (10-15 files)", accept_multiple_files=True, type=["pdf", "docx", "doc"])
+
+# if st.button("🚀 Process Batch"):
+#     if not uploaded_files:
+#         st.warning("Please upload files first.")
+#     else:
+#         progress_bar = st.progress(0)
+#         for i, f in enumerate(uploaded_files):
+#             with tempfile.NamedTemporaryFile(delete=False, suffix=f.name) as tmp:
+#                 tmp.write(f.getbuffer()); tmp_path = tmp.name
+#             try:
+#                 res = asyncio.run(run_pipeline_async(tmp_path))
+#                 data = res.get("extracted_data")
+#                 if data and "error" not in data:
+#                     st.session_state.master_results.append(data)
+#                     st.success(f"✓ {f.name} Processed")
+#                 else:
+#                     st.error(f"✗ Failed {f.name}: {data.get('error', 'Unknown Error')}")
+#             finally:
+#                 if os.path.exists(tmp_path): os.remove(tmp_path)
+#             progress_bar.progress((i + 1) / len(uploaded_files))
+
+# if st.session_state.master_results:
+#     rows = []
+#     for i, r in enumerate(st.session_state.master_results, 1):
+#         rows.append({"Sr No": i, "Position": "", "Name": r.get("name"), 
+#                      "Company": r.get("recent_company"), "Designation": r.get("recent_designation"), 
+#                      "Work Experience": r.get("total_exp"), "Location": r.get("location")})
+#         rows.append({"Sr No": "", "Position": "", "Name": "", 
+#                      "Company": r.get("prev_company"), "Designation": r.get("prev_designation"), 
+#                      "Work Experience": "", "Location": ""})
+    
+#     # CRITICAL: Force string conversion to prevent Arrow crash
+#     df = pd.DataFrame(rows).astype(str).replace(['None', 'nan'], '')
+#     st.dataframe(df, width='stretch')
+    
+#     buffer = BytesIO()
+#     with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+#         df.to_excel(writer, index=False)
+#     st.download_button("⬇️ Download Master Excel", buffer.getvalue(), "master_resumes.xlsx")
+
+# if st.button("🗑️ Clear All Data"):
+#     st.session_state.master_results = []
+#     st.rerun()
+
+# update withc click emails
 import streamlit as st
 import os, time, tempfile, pandas as pd, asyncio
 from io import BytesIO
@@ -437,14 +498,17 @@ from processing import pipeline
 
 st.set_page_config(page_title="Master Resume Portal", layout="wide")
 
+# 1. Initialize session state
 if "master_results" not in st.session_state:
     st.session_state.master_results = []
 
 st.title("📄 Master Resume Extraction Portal")
 
+# Async pipeline wrapper
 async def run_pipeline_async(file_path):
     return await pipeline.ainvoke({"file_path": file_path})
 
+# 2. File Upload & Processing
 uploaded_files = st.file_uploader("Upload Batch (10-15 files)", accept_multiple_files=True, type=["pdf", "docx", "doc"])
 
 if st.button("🚀 Process Batch"):
@@ -454,7 +518,8 @@ if st.button("🚀 Process Batch"):
         progress_bar = st.progress(0)
         for i, f in enumerate(uploaded_files):
             with tempfile.NamedTemporaryFile(delete=False, suffix=f.name) as tmp:
-                tmp.write(f.getbuffer()); tmp_path = tmp.name
+                tmp.write(f.getbuffer())
+                tmp_path = tmp.name
             try:
                 res = asyncio.run(run_pipeline_async(tmp_path))
                 data = res.get("extracted_data")
@@ -467,7 +532,24 @@ if st.button("🚀 Process Batch"):
                 if os.path.exists(tmp_path): os.remove(tmp_path)
             progress_bar.progress((i + 1) / len(uploaded_files))
 
+# 3. Boss's Email Tool
 if st.session_state.master_results:
+    st.divider()
+    st.subheader("📧 Email Quick-Copy Tool")
+    
+    # Extract unique emails
+    emails = [r.get("email") for r in st.session_state.master_results if r.get("email")]
+    unique_emails = sorted(list(set(emails)))
+    email_string = ", ".join(unique_emails)
+    
+    # Display area and copy button
+    st.text_area("All Extracted Emails (Comma separated):", value=email_string, height=100)
+    st.info("You can copy these emails directly from the box above.")
+
+    st.divider()
+    st.subheader("📋 Detailed Data")
+    
+    # 4. Table & Excel Download
     rows = []
     for i, r in enumerate(st.session_state.master_results, 1):
         rows.append({"Sr No": i, "Position": "", "Name": r.get("name"), 
@@ -477,7 +559,6 @@ if st.session_state.master_results:
                      "Company": r.get("prev_company"), "Designation": r.get("prev_designation"), 
                      "Work Experience": "", "Location": ""})
     
-    # CRITICAL: Force string conversion to prevent Arrow crash
     df = pd.DataFrame(rows).astype(str).replace(['None', 'nan'], '')
     st.dataframe(df, width='stretch')
     
