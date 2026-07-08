@@ -437,7 +437,6 @@ from processing import pipeline
 
 st.set_page_config(page_title="Master Resume Portal", layout="wide")
 
-# 1. CRITICAL: Initialize session state immediately
 if "master_results" not in st.session_state:
     st.session_state.master_results = []
 
@@ -455,9 +454,7 @@ if st.button("🚀 Process Batch"):
         progress_bar = st.progress(0)
         for i, f in enumerate(uploaded_files):
             with tempfile.NamedTemporaryFile(delete=False, suffix=f.name) as tmp:
-                tmp.write(f.getbuffer())
-                tmp_path = tmp.name
-            
+                tmp.write(f.getbuffer()); tmp_path = tmp.name
             try:
                 res = asyncio.run(run_pipeline_async(tmp_path))
                 data = res.get("extracted_data")
@@ -468,7 +465,6 @@ if st.button("🚀 Process Batch"):
                     st.error(f"✗ Failed {f.name}: {data.get('error', 'Unknown Error')}")
             finally:
                 if os.path.exists(tmp_path): os.remove(tmp_path)
-            
             progress_bar.progress((i + 1) / len(uploaded_files))
 
 if st.session_state.master_results:
@@ -481,7 +477,8 @@ if st.session_state.master_results:
                      "Company": r.get("prev_company"), "Designation": r.get("prev_designation"), 
                      "Work Experience": "", "Location": ""})
     
-    df = pd.DataFrame(rows)
+    # CRITICAL: Force string conversion to prevent Arrow crash
+    df = pd.DataFrame(rows).astype(str).replace(['None', 'nan'], '')
     st.dataframe(df, width='stretch')
     
     buffer = BytesIO()
