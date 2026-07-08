@@ -421,6 +421,79 @@
 # pipeline = builder.compile()
 
 # Async code
+# import os, json, re, mammoth, pdfplumber, time
+# from pathlib import Path
+# from langchain_groq import ChatGroq
+# from langgraph.graph import StateGraph, END
+# from typing import TypedDict
+
+# # Initialize Groq
+# llm = ChatGroq(model="llama-3.1-8b-instant", api_key=os.getenv("GROQ_API_KEY"))
+
+# class ResumePathState(TypedDict):
+#     file_path: str
+#     extracted_data: dict
+
+# async def invoke_with_retry_async(prompt, retries=5):
+#     """Exponential backoff to handle Rate Limits (429)."""
+#     for i in range(retries):
+#         try:
+#             return await llm.ainvoke(prompt)
+#         except Exception as e:
+#             if "429" in str(e):
+#                 time.sleep(10 * (2 ** i))
+#             else:
+#                 raise e
+#     return await llm.ainvoke(prompt)
+
+# async def load_and_extract(state: ResumePathState) -> dict:
+#     path = Path(state["file_path"])
+#     text = ""
+#     try:
+#         if path.suffix.lower() == ".pdf":
+#             with pdfplumber.open(str(path)) as pdf:
+#                 extracted_content = []
+#                 for p in pdf.pages:
+#                     page_text = p.extract_text()
+#                     if not page_text or len(page_text.strip()) < 10:
+#                         page_text = p.extract_text(layout=True)
+#                     extracted_content.append(page_text or "")
+#                 text = "\n".join(extracted_content)
+#         elif path.suffix.lower() in [".docx", ".doc"]:
+#             with open(str(path), "rb") as f:
+#                 text = mammoth.extract_raw_text(f).value
+#     except Exception as e:
+#         return {"extracted_data": {"error": f"Read error: {str(e)}"}}
+
+#     prompt = f"""
+#     Extract resume info to JSON. Location: City only.
+#     Return ONLY a raw JSON string. DO NOT include markdown, backticks, or intro text.
+#     Schema: {{"name": "str", "email": "str", "location": "str", "total_exp": "str", "recent_company": "str", "recent_designation": "str", "prev_company": "str", "prev_designation": "str"}}
+#     Text: {text[:8000]}
+#     """
+    
+#     response = await invoke_with_retry_async(prompt)
+#     content = response.content
+    
+#     # Bulletproof JSON cleaner
+#     content = re.sub(r'```json', '', content, flags=re.IGNORECASE)
+#     content = re.sub(r'```', '', content)
+#     match = re.search(r'\{.*\}', content, re.DOTALL)
+    
+#     if match:
+#         try:
+#             return {"extracted_data": json.loads(match.group(0))}
+#         except:
+#             return {"extracted_data": {"error": "JSON Parse Error"}}
+#     return {"extracted_data": {"error": "No JSON structure found"}}
+
+# builder = StateGraph(ResumePathState)
+# builder.add_node("extract", load_and_extract)
+# builder.set_entry_point("extract")
+# builder.add_edge("extract", END)
+# pipeline = builder.compile()
+
+""" Added email and contact number to the schema. """
 import os, json, re, mammoth, pdfplumber, time
 from pathlib import Path
 from langchain_groq import ChatGroq
@@ -468,7 +541,7 @@ async def load_and_extract(state: ResumePathState) -> dict:
     prompt = f"""
     Extract resume info to JSON. Location: City only.
     Return ONLY a raw JSON string. DO NOT include markdown, backticks, or intro text.
-    Schema: {{"name": "str", "email": "str", "location": "str", "total_exp": "str", "recent_company": "str", "recent_designation": "str", "prev_company": "str", "prev_designation": "str"}}
+    Schema: {{"name": "str", "email": "str", "contact_no": "str", "location": "str", "total_exp": "str", "recent_company": "str", "recent_designation": "str", "prev_company": "str", "prev_designation": "str"}}
     Text: {text[:8000]}
     """
     
