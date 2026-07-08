@@ -448,49 +448,37 @@ async def invoke_with_retry_async(prompt, retries=5):
     return await llm.ainvoke(prompt)
 
 async def load_and_extract(state: ResumePathState) -> dict:
-    path = Path(state["file_path"])
-    text = ""
-    try:
-        if path.suffix.lower() == ".pdf":
-            with pdfplumber.open(str(path)) as pdf:
-                extracted_content = []
-                for p in pdf.pages:
-                    # Multi-method Force-Read
-                    page_text = p.extract_text()
-                    if not page_text or len(page_text.strip()) < 10:
-                        page_text = p.extract_text(layout=True)
-                    if not page_text or len(page_text.strip()) < 10:
-                        page_text = "\n".join([c['text'] for c in p.chars])
-                    extracted_content.append(page_text or "")
-                text = "\n".join(extracted_content)
-        elif path.suffix.lower() in [".docx", ".doc"]:
-            with open(str(path), "rb") as f:
-                text = mammoth.extract_raw_text(f).value
-    except Exception as e:
-        return {"extracted_data": {"error": f"Read error: {str(e)}"}}
+    # ... (Keep your existing PDF/Word extraction logic) ...
 
     prompt = f"""
-    Extract resume info to JSON. 
-    Location: City only.
-    Recent/Prev roles: 2 most recent roles.
-    JSON Schema: {{"name": "str", "email": "str", "location": "str", "total_exp": "str", "recent_company": "str", "recent_designation": "str", "prev_company": "str", "prev_designation": "str"}}
-    Text: {text[:8000]}
+    CRITICAL: Extract data from the resume below.
+    Return ONLY a raw JSON string. DO NOT include any text before or after the JSON. 
+    DO NOT use markdown formatting.
+    
+    Fields: "name", "email", "location", "total_exp", "recent_company", "recent_designation", "prev_company", "prev_designation".
+    If data is missing, return "".
+    
+    Resume Text:
+    {text[:8000]}
     """
     
+    # Use our existing async invoke
     response = await invoke_with_retry_async(prompt)
     content = response.content
     
-    # Bulletproof JSON cleaner
-    content = re.sub(r'```json', '', content, flags=re.IGNORECASE)
-    content = re.sub(r'```', '', content)
-    match = re.search(r'\{.*\}', content, re.DOTALL)
+    # NEW: Aggressive Sanitization
+    # Strip everything up to the first '{' and after the last '}'
+    start_index = content.find('{')
+    end_index = content.rfind('}') + 1
     
-    if match:
+    if start_index != -1 and end_index != -1:
+        clean_json = content[start_index:end_index]
         try:
-            return {"extracted_data": json.loads(match.group(0))}
+            return {"extracted_data": json.loads(clean_json)}
         except:
-            return {"extracted_data": {"error": "JSON Parse Error"}}
-    return {"extracted_data": {"error": "No JSON found"}}
+            return {"extracted_data": {"error": "JSON Parse Error: Malformed JSON"}}
+    else:
+        return {"extracted_data": {"error": "JSON Parse Error: No JSON found"}}
 
 builder = StateGraph(ResumePathState)
 builder.add_node("extract", load_and_extract)
