@@ -366,6 +366,61 @@
 #     return pipeline.invoke({"file_path": file_path})
 
 # Processing .py with gemini increase token limit
+# import os, json, re, mammoth, pdfplumber, time
+# from pathlib import Path
+# from langchain_groq import ChatGroq
+# from langgraph.graph import StateGraph, END
+# from typing import TypedDict
+
+# # Initialize Groq
+# llm = ChatGroq(model="llama-3.1-8b-instant", api_key=os.getenv("GROQ_API_KEY"))
+
+# class ResumePathState(TypedDict):
+#     file_path: str
+#     extracted_data: dict
+
+# def invoke_with_retry(prompt, retries=5):
+#     """Exponential backoff: waits longer if Groq hits us with a Rate Limit."""
+#     for i in range(retries):
+#         try:
+#             return llm.invoke(prompt)
+#         except Exception as e:
+#             if "429" in str(e):
+#                 sleep_time = 10 * (2 ** i) 
+#                 time.sleep(sleep_time)
+#             else:
+#                 raise e
+#     return llm.invoke(prompt)
+
+# def load_and_extract(state: ResumePathState) -> dict:
+#     path = Path(state["file_path"])
+#     text = ""
+    
+#     # NEW: Trying a more aggressive text extraction
+#     try:
+#         if path.suffix.lower() == ".pdf":
+#             with pdfplumber.open(str(path)) as pdf:
+#                 # Try extracting as a layout first; if empty, use raw text
+#                 text = "\n".join([p.extract_text(layout=True) or p.extract_text() or "" for p in pdf.pages])
+#                 # If still empty, the file might be complex; try to get raw chars
+#                 if not text.strip():
+#                     text = "\n".join([p.extract_text(x_tolerance=2) for p in pdf.pages])
+                    
+#         elif path.suffix.lower() in [".docx", ".doc"]:
+#             with open(str(path), "rb") as f:
+#                 text = mammoth.extract_raw_text(f).value
+#     except Exception as e:
+#         return {"extracted_data": {"error": f"File read error: {str(e)}"}}
+
+#     # The rest of your logic (Prompt, Groq call, JSON repair) stays exactly the same
+    
+# builder = StateGraph(ResumePathState)
+# builder.add_node("extract", load_and_extract)
+# builder.set_entry_point("extract")
+# builder.add_edge("extract", END)
+# pipeline = builder.compile()
+
+# Async code
 import os, json, re, mammoth, pdfplumber, time
 from pathlib import Path
 from langchain_groq import ChatGroq
@@ -380,13 +435,13 @@ class ResumePathState(TypedDict):
     extracted_data: dict
 
 def invoke_with_retry(prompt, retries=5):
-    """Exponential backoff: waits longer if Groq hits us with a Rate Limit."""
+    """Exponential backoff to handle Rate Limits (429)."""
     for i in range(retries):
         try:
             return llm.invoke(prompt)
         except Exception as e:
             if "429" in str(e):
-                sleep_time = 10 * (2 ** i) 
+                sleep_time = 10 * (2 ** i)
                 time.sleep(sleep_time)
             else:
                 raise e
@@ -395,25 +450,38 @@ def invoke_with_retry(prompt, retries=5):
 def load_and_extract(state: ResumePathState) -> dict:
     path = Path(state["file_path"])
     text = ""
-    
-    # NEW: Trying a more aggressive text extraction
     try:
         if path.suffix.lower() == ".pdf":
             with pdfplumber.open(str(path)) as pdf:
-                # Try extracting as a layout first; if empty, use raw text
-                text = "\n".join([p.extract_text(layout=True) or p.extract_text() or "" for p in pdf.pages])
-                # If still empty, the file might be complex; try to get raw chars
-                if not text.strip():
-                    text = "\n".join([p.extract_text(x_tolerance=2) for p in pdf.pages])
-                    
+                extracted_content = []
+                for p in pdf.pages:
+                    # Multi-method Force-Read
+                    page_text = p.extract_text()
+                    if not page_text or len(page_text.strip()) < 10:
+                        page_text = p.extract_text(layout=True)
+                    if not page_text or len(page_text.strip()) < 10:
+                        page_text = "\n".join([c['text'] for c in p.chars])
+                    extracted_content.append(page_text or "")
+                text = "\n".join(extracted_content)
         elif path.suffix.lower() in [".docx", ".doc"]:
             with open(str(path), "rb") as f:
                 text = mammoth.extract_raw_text(f).value
     except Exception as e:
-        return {"extracted_data": {"error": f"File read error: {str(e)}"}}
+        return {"extracted_data": {"error": f"Read error: {str(e)}"}}
 
-    # The rest of your logic (Prompt, Groq call, JSON repair) stays exactly the same
+    prompt = f"""
+    Extract resume info to JSON. Location: City only.
+    Schema: {{"name": "str", "email": "str", "location": "str", "total_exp": "str", "recent_company": "str", "recent_designation": "str", "prev_company": "str", "prev_designation": "str"}}
+    Text: {text[:8000]}
+    """
     
+    response = invoke_with_retry(prompt).content
+    json_str = re.sub(r'[\s\S]*?(\{[\s\S]*\})[\s\S]*', r'\1', response)
+    try:
+        return {"extracted_data": json.loads(json_str)}
+    except:
+        return {"extracted_data": {"error": "JSON Parse Error"}}
+
 builder = StateGraph(ResumePathState)
 builder.add_node("extract", load_and_extract)
 builder.set_entry_point("extract")
