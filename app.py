@@ -435,87 +435,60 @@ import os, time, tempfile, pandas as pd, asyncio
 from io import BytesIO
 from processing import pipeline
 
-# 1. Page Configuration
-st.set_page_config(page_title="Resume Portal", layout="wide")
-st.title("📄 Master Resume Extraction Portal")
+st.set_page_config(page_title="Master Resume Portal", layout="wide")
 
-# 2. Async Wrapper to run the pipeline
-async def run_pipeline_async(file_path):
-    # ainvoke allows the system to remain non-blocking during LLM calls
-    return await pipeline.ainvoke({"file_path": file_path})
-
-# Initialize state to hold data across batches
+# 1. CRITICAL: Initialize session state immediately
 if "master_results" not in st.session_state:
     st.session_state.master_results = []
 
-# 3. File Uploader
+st.title("📄 Master Resume Extraction Portal")
+
+async def run_pipeline_async(file_path):
+    return await pipeline.ainvoke({"file_path": file_path})
+
 uploaded_files = st.file_uploader("Upload Batch (10-15 files)", accept_multiple_files=True, type=["pdf", "docx", "doc"])
 
-# 4. Processing Logic
 if st.button("🚀 Process Batch"):
     if not uploaded_files:
         st.warning("Please upload files first.")
     else:
         progress_bar = st.progress(0)
-        
         for i, f in enumerate(uploaded_files):
-            # Create temporary file
             with tempfile.NamedTemporaryFile(delete=False, suffix=f.name) as tmp:
                 tmp.write(f.getbuffer())
                 tmp_path = tmp.name
             
             try:
-                # Run the async pipeline using asyncio.run
                 res = asyncio.run(run_pipeline_async(tmp_path))
                 data = res.get("extracted_data")
-                
                 if data and "error" not in data:
                     st.session_state.master_results.append(data)
                     st.success(f"✓ {f.name} Processed")
                 else:
                     st.error(f"✗ Failed {f.name}: {data.get('error', 'Unknown Error')}")
-                    
             finally:
-                # Ensure the temp file is removed even if extraction fails
-                if os.path.exists(tmp_path):
-                    os.remove(tmp_path)
+                if os.path.exists(tmp_path): os.remove(tmp_path)
             
-            # Update progress
             progress_bar.progress((i + 1) / len(uploaded_files))
 
-# 5. Display Table & Excel Download
 if st.session_state.master_results:
     rows = []
     for i, r in enumerate(st.session_state.master_results, 1):
-        # Recent Role Row
-        rows.append({
-            "Sr No": i, "Position": "", "Name": r.get("name"), 
-            "Company": r.get("recent_company"), "Designation": r.get("recent_designation"), 
-            "Work Experience": r.get("total_exp"), "Location": r.get("location")
-        })
-        # Previous Role Row
-        rows.append({
-            "Sr No": "", "Position": "", "Name": "", 
-            "Company": r.get("prev_company"), "Designation": r.get("prev_designation"), 
-            "Work Experience": "", "Location": ""
-        })
+        rows.append({"Sr No": i, "Position": "", "Name": r.get("name"), 
+                     "Company": r.get("recent_company"), "Designation": r.get("recent_designation"), 
+                     "Work Experience": r.get("total_exp"), "Location": r.get("location")})
+        rows.append({"Sr No": "", "Position": "", "Name": "", 
+                     "Company": r.get("prev_company"), "Designation": r.get("prev_designation"), 
+                     "Work Experience": "", "Location": ""})
     
     df = pd.DataFrame(rows)
     st.dataframe(df, width='stretch')
     
-    # Generate Excel file
     buffer = BytesIO()
     with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=False)
-    
-    st.download_button(
-        label="⬇️ Download Master Excel", 
-        data=buffer.getvalue(), 
-        file_name="master_resumes.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+    st.download_button("⬇️ Download Master Excel", buffer.getvalue(), "master_resumes.xlsx")
 
-# 6. Session Reset
 if st.button("🗑️ Clear All Data"):
     st.session_state.master_results = []
     st.rerun()

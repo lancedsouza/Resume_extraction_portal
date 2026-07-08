@@ -434,20 +434,20 @@ class ResumePathState(TypedDict):
     file_path: str
     extracted_data: dict
 
-def invoke_with_retry(prompt, retries=5):
+async def invoke_with_retry_async(prompt, retries=5):
     """Exponential backoff to handle Rate Limits (429)."""
     for i in range(retries):
         try:
-            return llm.invoke(prompt)
+            return await llm.ainvoke(prompt)
         except Exception as e:
             if "429" in str(e):
                 sleep_time = 10 * (2 ** i)
                 time.sleep(sleep_time)
             else:
                 raise e
-    return llm.invoke(prompt)
+    return await llm.ainvoke(prompt)
 
-def load_and_extract(state: ResumePathState) -> dict:
+async def load_and_extract(state: ResumePathState) -> dict:
     path = Path(state["file_path"])
     text = ""
     try:
@@ -470,17 +470,27 @@ def load_and_extract(state: ResumePathState) -> dict:
         return {"extracted_data": {"error": f"Read error: {str(e)}"}}
 
     prompt = f"""
-    Extract resume info to JSON. Location: City only.
-    Schema: {{"name": "str", "email": "str", "location": "str", "total_exp": "str", "recent_company": "str", "recent_designation": "str", "prev_company": "str", "prev_designation": "str"}}
+    Extract resume info to JSON. 
+    Location: City only.
+    Recent/Prev roles: 2 most recent roles.
+    JSON Schema: {{"name": "str", "email": "str", "location": "str", "total_exp": "str", "recent_company": "str", "recent_designation": "str", "prev_company": "str", "prev_designation": "str"}}
     Text: {text[:8000]}
     """
     
-    response = invoke_with_retry(prompt).content
-    json_str = re.sub(r'[\s\S]*?(\{[\s\S]*\})[\s\S]*', r'\1', response)
-    try:
-        return {"extracted_data": json.loads(json_str)}
-    except:
-        return {"extracted_data": {"error": "JSON Parse Error"}}
+    response = await invoke_with_retry_async(prompt)
+    content = response.content
+    
+    # Bulletproof JSON cleaner
+    content = re.sub(r'```json', '', content, flags=re.IGNORECASE)
+    content = re.sub(r'```', '', content)
+    match = re.search(r'\{.*\}', content, re.DOTALL)
+    
+    if match:
+        try:
+            return {"extracted_data": json.loads(match.group(0))}
+        except:
+            return {"extracted_data": {"error": "JSON Parse Error"}}
+    return {"extracted_data": {"error": "No JSON found"}}
 
 builder = StateGraph(ResumePathState)
 builder.add_node("extract", load_and_extract)
