@@ -573,7 +573,7 @@ from langgraph.graph import StateGraph, END
 from typing import TypedDict
 
 # 1. ARCHITECTURE FIX: Decoupled model configuration
-ACTIVE_MODEL = os.getenv("GROQ_MODEL_NAME", "llama3-8b-8192")
+ACTIVE_MODEL = os.getenv("GROQ_MODEL_NAME", "openai/gpt-oss-120b")
 llm = ChatGroq(model=ACTIVE_MODEL, api_key=os.getenv("GROQ_API_KEY"))
 
 class ResumePathState(TypedDict):
